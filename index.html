@@ -549,7 +549,7 @@
     const btnHomingContinue = $('#btn-homing-continue');
     const btnHomingReset = $('#btn-homing-reset');
     const btnHomingMouse = $('#btn-homing-mouse');
-    let homing = { touches: new Map(), stableSince: null };
+    let homing = { touches: new Map(), stableSince: null, capturedPoints: null };
 
     function resizeCanvas(c) {
       const dpr = window.devicePixelRatio || 1;
@@ -567,17 +567,24 @@
       for (let x=0; x<ctx.canvas.width; x+=32) { ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,ctx.canvas.height); ctx.stroke(); }
       for (let y=0; y<ctx.canvas.height; y+=32) { ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(ctx.canvas.width,y); ctx.stroke(); }
       ctx.globalAlpha = 1;
-      // touches
+      // touches or captured points
       let i=0; const colors = {index:'#6dc2ff', middle:'#79e4b9', ring:'#ffcc66', pinky:'#ff6d6d', thumb:'#b38cff'};
-      touches.forEach(t=>{
+      const points = homing.capturedPoints ? homing.capturedPoints : Array.from(touches.values());
+      points.forEach(t=>{
         const r = 18; ctx.beginPath(); ctx.arc(t.x, t.y, r, 0, Math.PI*2);
         ctx.fillStyle = (colors[t.finger]||'#6dc2ff'); ctx.globalAlpha=0.2; ctx.fill(); ctx.globalAlpha=1;
         ctx.lineWidth = 2; ctx.strokeStyle = ctx.fillStyle; ctx.stroke();
         ctx.fillStyle = '#cfe2ff'; ctx.font = '12px sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
-        ctx.fillText(t.finger||('T'+(++i)), t.x, t.y);
+        const label = t.finger || ('T'+(++i));
+        ctx.fillText(label, t.x, t.y);
       });
     }
     function updateHomingStatus() {
+      if (homing.capturedPoints && homing.capturedPoints.length) {
+        homingStatus.textContent = `Captured: ${homing.capturedPoints.length}`;
+        btnHomingContinue.disabled = false;
+        return;
+      }
       const count = homing.touches.size;
       const stableFor = homing.stableSince? ((performance.now() - homing.stableSince)/1000).toFixed(1) : '0.0';
       homingStatus.textContent = `Touches: ${count} · Stable: ${stableFor}s`;
@@ -606,6 +613,10 @@
         if (Math.hypot(dx,dy) > 6) unstable = true;
       });
       if (!homing.stableSince || unstable || homing.touches.size !== prev.size) homing.stableSince = now;
+      const stableForSec = homing.stableSince ? (now - homing.stableSince)/1000 : 0;
+      if (!homing.capturedPoints && homing.touches.size >= 4 && stableForSec >= 2.0) {
+        homing.capturedPoints = Array.from(homing.touches.values()).map(t=> ({ x: t.x, y: t.y, finger: null }));
+      }
       homing._last = new Map(homing.touches);
       drawTouches(ctxH, homing.touches);
       updateHomingStatus();
@@ -635,12 +646,16 @@
         if (Math.hypot(dx,dy) > 6) unstable = true;
       });
       if (!homing.stableSince || unstable || homing.touches.size !== prev.size) homing.stableSince = now;
+      const stableForSec = homing.stableSince ? (now - homing.stableSince)/1000 : 0;
+      if (!homing.capturedPoints && homing.touches.size >= 4 && stableForSec >= 2.0) {
+        homing.capturedPoints = Array.from(homing.touches.values()).map(t=> ({ x: t.x, y: t.y, finger: null }));
+      }
       homing._last = new Map(homing.touches);
       drawTouches(ctxH, homing.touches);
       updateHomingStatus();
     }
     function labelFingersInteractively() {
-      // If multitouch present, let user tap labels in order to assign fingers to the 5 nearest contacts.
+      // Label captured points by clicking nearest point in order.
       const order = ['thumb','index','middle','ring','pinky'];
       let step = 0;
       const prompt = $('#homingPrompt');
@@ -648,11 +663,10 @@
       function onClick(ev){
         const rect = canvasHoming.getBoundingClientRect();
         const x = ev.clientX - rect.left; const y = ev.clientY - rect.top;
-        // find nearest touch
-        let nearestId = null; let best = Infinity;
-        homing.touches.forEach((t, id)=>{ const d = (t.x-x)**2 + (t.y-y)**2; if (d<best) { best=d; nearestId=id; } });
-        if (nearestId==null) return;
-        homing.touches.get(nearestId).finger = order[step];
+        let nearestIdx = -1; let best = Infinity;
+        (homing.capturedPoints||[]).forEach((t, idx)=>{ if (t.finger) return; const d = (t.x-x)**2 + (t.y-y)**2; if (d<best) { best=d; nearestIdx=idx; } });
+        if (nearestIdx < 0) return;
+        homing.capturedPoints[nearestIdx].finger = order[step];
         drawTouches(ctxH, homing.touches);
         step++;
         if (step<order.length) {
@@ -660,9 +674,8 @@
         } else {
           canvasHoming.removeEventListener('click', onClick);
           prompt.textContent = 'Great! Anchors captured.';
-          // Save anchors by finger name
           const anchors = {};
-          homing.touches.forEach(t=>{ if (t.finger) anchors[t.finger] = {x:t.x, y:t.y}; });
+          (homing.capturedPoints||[]).forEach(t=>{ if (t.finger) anchors[t.finger] = {x:t.x, y:t.y}; });
           State.set('homing.anchors', anchors);
         }
       }
@@ -708,10 +721,15 @@
     } else {
       ['touchstart','touchmove','touchend','touchcancel'].forEach(type=> canvasHoming.addEventListener(type, ev=> homingTouchEvent(canvasHoming, ev), {passive:false}));
     }
-    btnHomingReset.addEventListener('click', ()=>{ homing = { touches: new Map(), stableSince: null }; drawTouches(ctxH, homing.touches); updateHomingStatus(); });
+    btnHomingReset.addEventListener('click', ()=>{ homing = { touches: new Map(), stableSince: null, capturedPoints: null }; drawTouches(ctxH, homing.touches); updateHomingStatus(); });
     btnHomingContinue.addEventListener('click', ()=>{
       // Require labeling to know which touch is which
       if (!State.data.homing.anchors) {
+        // If not captured yet, snapshot from current touches
+        if (!homing.capturedPoints || homing.capturedPoints.length === 0) {
+          homing.capturedPoints = Array.from(homing.touches.values()).map(t=> ({ x: t.x, y: t.y, finger: null }));
+          drawTouches(ctxH, homing.touches);
+        }
         labelFingersInteractively();
         // Proceed to measurement after labeling completes
         const wait = setInterval(()=>{
