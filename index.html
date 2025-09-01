@@ -889,7 +889,12 @@
     function measurePointerEvent(canvas, e) {
       e.preventDefault();
       const rect = canvas.getBoundingClientRect(); const x = e.clientX - rect.left; const y = e.clientY - rect.top;
-      if (e.type === 'pointerdown') { canvas.setPointerCapture(e.pointerId); captureSampleAt(x, y); }
+      if (e.type === 'pointerdown') {
+        canvas.setPointerCapture(e.pointerId);
+        const cur = Fingers[measure.fingerIdx];
+        const assigned = nearestFingerFromAnchors(x, y);
+        if (assigned === cur) captureSampleAt(x, y);
+      }
       if (e.type === 'pointerdown' || e.type === 'pointermove') measure.touches.set(e.pointerId, { id:e.pointerId, x, y });
       if (e.type === 'pointerup' || e.type === 'pointercancel') measure.touches.delete(e.pointerId);
       // compute span for active finger relative to homing anchor
@@ -915,17 +920,18 @@
       if (e.type === 'touchstart' || e.type === 'touchmove') {
         const changed = Array.from(e.changedTouches);
         if (e.type === 'touchstart') {
-          const finger = Fingers[measure.fingerIdx];
-          const anchors = State.data.homing.anchors || {};
-          const a = anchors[finger];
-          if (a) {
-            let best=null, bestD=Infinity;
-            changed.forEach(t=>{
-              const x0 = t.clientX - rect.left; const y0 = t.clientY - rect.top;
-              const d = (x0-a.x)**2 + (y0-a.y)**2; if (d<bestD){ bestD=d; best={x:x0,y:y0,id:t.identifier}; }
-            });
-            if (best) captureSampleAt(best.x, best.y);
-          }
+          const cur = Fingers[measure.fingerIdx];
+          // Among newly started touches, capture only those assigned to the current finger
+          let best=null, bestD=Infinity;
+          changed.forEach(t=>{
+            const x0 = t.clientX - rect.left; const y0 = t.clientY - rect.top;
+            const assigned = nearestFingerFromAnchors(x0, y0);
+            if (assigned !== cur) return;
+            const a = (State.data.homing.anchors||{})[cur];
+            const d = a ? (x0-a.x)**2 + (y0-a.y)**2 : 0;
+            if (d < bestD) { bestD = d; best = { x: x0, y: y0, id: t.identifier }; }
+          });
+          if (best) captureSampleAt(best.x, best.y);
         }
         for (const t of changed) {
           const x = t.clientX - rect.left; const y = t.clientY - rect.top;
@@ -1205,6 +1211,15 @@
       const blob = new Blob([exportCoords(State.data.layout)], {type:'application/json'});
       const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'ergomaker-layout.json'; a.click(); URL.revokeObjectURL(a.href);
     });
+    function nearestFingerFromAnchors(x, y) {
+      const anchors = State.data.homing.anchors || {};
+      let bestF = null, bestD = Infinity;
+      Object.entries(anchors).forEach(([f, a])=>{
+        const d = (x-a.x)*(x-a.x) + (y-a.y)*(y-a.y);
+        if (d < bestD) { bestD = d; bestF = f; }
+      });
+      return bestF;
+    }
 
     // Direct navigation for dev convenience
     window.__app = { State, showScreen, refreshResults };
