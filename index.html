@@ -852,6 +852,32 @@
           ctx.lineWidth = 1.5; ctx.fill(); ctx.stroke();
         }
       });
+      // Thumb cluster (arc), count from constraints
+      const thumbCount = State.data.constraints.thumbCount || 3;
+      const th = effAnchorFor('thumb') || anchors.thumb;
+      if (th && thumbCount > 0) {
+        const radius = Math.min(pitchXPx, pitchYPx) * 0.9;
+        const start = Math.PI * 0.15; const sweep = Math.PI * 0.6;
+        const rightHand = (State.data.constraints?.dominant || 'right') !== 'left';
+        const dir = rightHand ? 1 : -1; // flip horizontally for left hand
+        for (let i=0; i<thumbCount; i++) {
+          const t = thumbCount === 1 ? 0.5 : i/(thumbCount-1);
+          const ang = start + t*sweep;
+          const cx = th.x + dir * Math.cos(ang) * radius;
+          const cy = th.y + Math.sin(ang) * radius;
+          const x = cx - w/2; const y = cy - h/2;
+          ctx.beginPath();
+          ctx.moveTo(x+r, y); ctx.arcTo(x+w, y, x+w, y+h, r);
+          ctx.arcTo(x+w, y+h, x, y+h, r);
+          ctx.arcTo(x, y+h, x, y, r);
+          ctx.arcTo(x, y, x+w, y, r);
+          ctx.closePath();
+          const isCurrentThumb = Fingers[measure.fingerIdx] === 'thumb';
+          ctx.fillStyle = isCurrentThumb ? '#b38cff22' : '#ffffff10';
+          ctx.strokeStyle = isCurrentThumb ? '#b38cffaa' : '#9fb3c844';
+          ctx.lineWidth = 1.5; ctx.fill(); ctx.stroke();
+        }
+      }
     }
     function drawMeasure() {
       const ctx = ctxM; ctx.clearRect(0,0,ctx.canvas.width, ctx.canvas.height);
