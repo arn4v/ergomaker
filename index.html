@@ -71,6 +71,8 @@
 
     .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; }
     textarea.code { width: 100%; min-height: 180px; background: #0a0f15; color: var(--fg); border: 1px solid var(--grid); border-radius: 10px; padding: 10px; }
+    /* Ensure measurement screens allocate most space to canvas */
+    #screen-homing, #screen-measure { grid-template-rows: 1fr auto; }
   </style>
 </head>
 <body>
@@ -249,6 +251,7 @@
         <div class="buttons">
           <button class="btn" data-back="constraints">Back</button>
           <div>
+            <button class="btn" id="btn-homing-mouse">Use mouse mode</button>
             <button class="btn" id="btn-homing-reset">Reset</button>
             <button class="btn primary" id="btn-homing-continue" disabled>Continue</button>
           </div>
@@ -529,6 +532,7 @@
     const homingStatus = $('#homingStatus');
     const btnHomingContinue = $('#btn-homing-continue');
     const btnHomingReset = $('#btn-homing-reset');
+    const btnHomingMouse = $('#btn-homing-mouse');
     let homing = { touches: new Map(), stableSince: null };
 
     function resizeCanvas(c) {
@@ -590,6 +594,35 @@
       drawTouches(ctxH, homing.touches);
       updateHomingStatus();
     }
+    // Touch Events fallback (for browsers without Pointer Events)
+    function homingTouchEvent(canvas, e) {
+      e.preventDefault();
+      const rect = canvas.getBoundingClientRect();
+      const now = performance.now();
+      if (e.type === 'touchstart' || e.type === 'touchmove') {
+        for (const t of Array.from(e.changedTouches)) {
+          const x = t.clientX - rect.left; const y = t.clientY - rect.top;
+          homing.touches.set(t.identifier, { id: t.identifier, x, y, finger: null });
+        }
+      }
+      if (e.type === 'touchend' || e.type === 'touchcancel') {
+        for (const t of Array.from(e.changedTouches)) {
+          homing.touches.delete(t.identifier);
+        }
+      }
+      const prev = homing._last || new Map();
+      let unstable = false;
+      homing.touches.forEach((t, id)=>{
+        const p = prev.get(id);
+        if (!p) return;
+        const dx = t.x - p.x, dy = t.y - p.y;
+        if (Math.hypot(dx,dy) > 6) unstable = true;
+      });
+      if (!homing.stableSince || unstable || homing.touches.size !== prev.size) homing.stableSince = now;
+      homing._last = new Map(homing.touches);
+      drawTouches(ctxH, homing.touches);
+      updateHomingStatus();
+    }
     function labelFingersInteractively() {
       // If multitouch present, let user tap labels in order to assign fingers to the 5 nearest contacts.
       const order = ['thumb','index','middle','ring','pinky'];
@@ -619,13 +652,46 @@
       }
       canvasHoming.addEventListener('click', onClick);
     }
+    function labelByMouseClicks() {
+      // For desktops without multitouch: click to place anchors in order
+      const order = ['thumb','index','middle','ring','pinky'];
+      let step = 0;
+      const prompt = $('#homingPrompt');
+      const anchors = {};
+      prompt.textContent = 'Click to place: ' + order[step];
+      function onClick(ev){
+        const rect = canvasHoming.getBoundingClientRect();
+        const x = ev.clientX - rect.left; const y = ev.clientY - rect.top;
+        anchors[order[step]] = {x, y};
+        // reflect in touches for visualization
+        homing.touches = new Map(Object.entries(anchors).map(([finger, a], i)=> [i+1, { id: i+1, x: a.x, y: a.y, finger } ]));
+        drawTouches(ctxH, homing.touches);
+        step++;
+        if (step<order.length) {
+          prompt.textContent = 'Click to place: ' + order[step];
+        } else {
+          canvasHoming.removeEventListener('click', onClick);
+          prompt.textContent = 'Great! Anchors captured.';
+          State.set('homing.anchors', anchors);
+          homing.stableSince = performance.now();
+          updateHomingStatus();
+          btnHomingContinue.disabled = false;
+        }
+      }
+      canvasHoming.addEventListener('click', onClick);
+    }
     function initHoming() {
       resizeCanvas(canvasHoming);
       drawTouches(ctxH, new Map());
     }
     initHoming();
     window.addEventListener('resize', ()=>{ resizeCanvas(canvasHoming); drawTouches(ctxH, homing.touches); });
-    ['pointerdown','pointermove','pointerup','pointercancel'].forEach(type=> canvasHoming.addEventListener(type, ev=> homingPointerEvent(canvasHoming, ev), {passive:false}));
+    const hasPointer = 'PointerEvent' in window;
+    if (hasPointer) {
+      ['pointerdown','pointermove','pointerup','pointercancel'].forEach(type=> canvasHoming.addEventListener(type, ev=> homingPointerEvent(canvasHoming, ev), {passive:false}));
+    } else {
+      ['touchstart','touchmove','touchend','touchcancel'].forEach(type=> canvasHoming.addEventListener(type, ev=> homingTouchEvent(canvasHoming, ev), {passive:false}));
+    }
     btnHomingReset.addEventListener('click', ()=>{ homing = { touches: new Map(), stableSince: null }; drawTouches(ctxH, homing.touches); updateHomingStatus(); });
     btnHomingContinue.addEventListener('click', ()=>{
       // Require labeling to know which touch is which
@@ -638,6 +704,9 @@
       } else {
         showScreen('measure');
       }
+    });
+    btnHomingMouse.addEventListener('click', ()=>{
+      labelByMouseClicks();
     });
 
     // Measurement
@@ -707,6 +776,36 @@
       drawMeasure();
       updateMeasureStatus();
     }
+    function measureTouchEvent(canvas, e) {
+      e.preventDefault();
+      const rect = canvas.getBoundingClientRect();
+      if (e.type === 'touchstart' || e.type === 'touchmove') {
+        for (const t of Array.from(e.changedTouches)) {
+          const x = t.clientX - rect.left; const y = t.clientY - rect.top;
+          measure.touches.set(t.identifier, { id: t.identifier, x, y });
+        }
+      }
+      if (e.type === 'touchend' || e.type === 'touchcancel') {
+        for (const t of Array.from(e.changedTouches)) {
+          measure.touches.delete(t.identifier);
+        }
+      }
+      // compute span for active finger
+      const finger = Fingers[measure.fingerIdx];
+      const anchors = State.data.homing.anchors || {};
+      const a = anchors[finger];
+      if (a) {
+        let best=null, dBest=Infinity; measure.touches.forEach((t)=>{ const d = (t.x-a.x)**2 + (t.y-a.y)**2; if (d<dBest){ dBest=d; best=t; } });
+        if (best) {
+          const upPx = Math.max(0, a.y - best.y);
+          const downPx = Math.max(0, best.y - a.y);
+          const latPx = Math.abs(best.x - a.x);
+          measure.span = { finger, upPx, downPx, latPx };
+        }
+      }
+      drawMeasure();
+      updateMeasureStatus();
+    }
     function updateMeasureStatus() {
       const pxmm = State.data.calib.pxPerMM || 3.78;
       const s = measure.span;
@@ -733,7 +832,11 @@
       updateMeasureStatus();
       if (measure.fingerIdx === Fingers.length-1) btnMeasureNext.disabled = true; else btnMeasureNext.disabled = false;
     }
-    ['pointerdown','pointermove','pointerup','pointercancel'].forEach(type=> canvasMeasure.addEventListener(type, ev=> measurePointerEvent(canvasMeasure, ev), {passive:false}));
+    if (hasPointer) {
+      ['pointerdown','pointermove','pointerup','pointercancel'].forEach(type=> canvasMeasure.addEventListener(type, ev=> measurePointerEvent(canvasMeasure, ev), {passive:false}));
+    } else {
+      ['touchstart','touchmove','touchend','touchcancel'].forEach(type=> canvasMeasure.addEventListener(type, ev=> measureTouchEvent(canvasMeasure, ev), {passive:false}));
+    }
     btnMeasureRedo.addEventListener('click', ()=>{ measure.span = null; drawMeasure(); updateMeasureStatus(); });
     btnMeasureDone.addEventListener('click', ()=> commitMeasurement());
     btnMeasureNext.addEventListener('click', ()=> advanceFinger());
