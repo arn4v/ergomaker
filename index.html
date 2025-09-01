@@ -616,6 +616,7 @@
       const stableForSec = homing.stableSince ? (now - homing.stableSince)/1000 : 0;
       if (!homing.capturedPoints && homing.touches.size >= 4 && stableForSec >= 2.0) {
         homing.capturedPoints = Array.from(homing.touches.values()).map(t=> ({ x: t.x, y: t.y, finger: null }));
+        autoDetectThumb();
       }
       homing._last = new Map(homing.touches);
       drawTouches(ctxH, homing.touches);
@@ -649,14 +650,28 @@
       const stableForSec = homing.stableSince ? (now - homing.stableSince)/1000 : 0;
       if (!homing.capturedPoints && homing.touches.size >= 4 && stableForSec >= 2.0) {
         homing.capturedPoints = Array.from(homing.touches.values()).map(t=> ({ x: t.x, y: t.y, finger: null }));
+        autoDetectThumb();
       }
       homing._last = new Map(homing.touches);
       drawTouches(ctxH, homing.touches);
       updateHomingStatus();
     }
+    function autoDetectThumb() {
+      const pts = homing.capturedPoints || [];
+      if (pts.length < 2) return;
+      // Use centroid method: thumb tends to be farthest from the cluster of other fingers
+      const cx = pts.reduce((s,p)=>s+p.x,0)/pts.length;
+      const cy = pts.reduce((s,p)=>s+p.y,0)/pts.length;
+      let farIdx = 0, farD = -1;
+      pts.forEach((p,i)=>{ const d = (p.x-cx)*(p.x-cx) + (p.y-cy)*(p.y-cy); if (d>farD){ farD=d; farIdx=i; } });
+      // Assign thumb if not already labeled
+      if (!pts[farIdx].finger) pts[farIdx].finger = 'thumb';
+    }
     function labelFingersInteractively() {
       // Label captured points by clicking nearest point in order.
-      const order = ['thumb','index','middle','ring','pinky'];
+      // Auto-detect thumb first if not set.
+      if (homing.capturedPoints && !homing.capturedPoints.some(p=>p.finger==='thumb')) autoDetectThumb();
+      const order = ['thumb','index','middle','ring','pinky'].filter(f=> !(homing.capturedPoints||[]).some(p=>p.finger===f));
       let step = 0;
       const prompt = $('#homingPrompt');
       prompt.textContent = 'Tap the contact for: ' + order[step];
@@ -730,6 +745,7 @@
           homing.capturedPoints = Array.from(homing.touches.values()).map(t=> ({ x: t.x, y: t.y, finger: null }));
           drawTouches(ctxH, homing.touches);
         }
+        autoDetectThumb();
         labelFingersInteractively();
         // Proceed to measurement after labeling completes
         const wait = setInterval(()=>{
