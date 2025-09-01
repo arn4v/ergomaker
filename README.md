@@ -2,6 +2,10 @@
 
 Design notes and product vision for a single-file HTML/JS app that helps a person discover an optimal split keyboard key layout for their specific hands and preferences.
 
+## Project Status (Current Behavior)
+
+The single-file app (`index.html`) runs locally with no network calls and guides users through: constraints → optional calibration → homing capture → per-finger sampling → candidate layout → export. It supports touch (Pointer Events + Touch Events fallback for iPad Safari) and a desktop mouse mode for anchors. State persists locally via `localStorage` and can be exported.
+
 ## Vision
 
 A local, privacy-first, guided experience that:
@@ -28,16 +32,20 @@ A local, privacy-first, guided experience that:
 - Optional usage profile (writing/coding/gaming/mixed). V1 focuses on comfort only (uniform key weights); frequency weighting can come later.
 
 3) Homing Posture Capture (Multitouch)
-- Rest hand naturally on canvas; place finger pads (I/M/R/P) and thumb where they feel most neutral.
-- Record contact centroids and relative orientation of index→pinky line; optionally use device orientation.
-- Save as the “home anchors” for each finger and the thumb.
+- Rest hand naturally on the canvas; place four fingertips and the thumb in a neutral homing posture.
+- Stability timer (~2 seconds) snapshots contacts; you may lift your hand afterward — the capture persists.
+- Auto-labeling algorithm:
+  - Thumb: farthest point from the centroid of the captured contacts.
+  - Others: x-order, respecting dominant hand (right: left→right = index→middle→ring→pinky; left mirrored).
+- Anchors are saved immediately and used in later steps; desktop “Mouse mode” allows sequential clicks to set anchors.
 
 4) Finger Travel Measurement
 - For each finger (index, middle, ring, pinky, thumb), in order:
-  - Keep the hand anchored in the homing posture.
-  - Slide only the prompted finger “up” and “down” through what feels like comfortable rows.
-  - Record maximum comfortable displacement (up/down), plus a “comfortable” midpoint.
-  - Optional: capture slight inboard/outboard (lateral) travel to model splay or column rotation.
+  - Keep the hand anchored; you can rest all fingertips on-screen.
+  - Each touch-down adds a sample for the current finger only (others are ignored).
+  - The app accumulates samples and computes up/down/lateral envelopes in mm.
+  - The keycap overlay updates live: the column for the current finger shifts to an optimized home (centered between min/max vertical samples; median lateral), with bounded limits.
+  - Status shows Up/Down/Lateral, sample count, detected style (ortholinear/stagger), and X/Y offset of the optimized home.
 
 5) Candidate Generation & Scoring
 - Generate grid candidates per constraints (rows/columns, staggers, column curves, thumb cluster shapes).
@@ -56,6 +64,7 @@ A local, privacy-first, guided experience that:
 - Hand scale (mm/px) and per-user key pitch preference.
 - Inferred hand splay (index→pinky vector) and optional column rotation hints.
 - Optional: usage frequency table from sample text or presets.
+- Optimized anchors per finger (optAnchors) derived from samples; used by generation/export.
 
 ## Comfort Model (Initial Sketch)
 
@@ -69,17 +78,17 @@ A local, privacy-first, guided experience that:
 ## Output Formats
 
 - KLE JSON (Keyboard Layout Editor) for visualization/import.
-- Simple JSON: per-hand key coordinates and metadata (pitchXMM, pitchYMM, stagger, column rotations, switch/cap presets, switch body keepout dims).
+- Simple JSON: per-hand key coordinates and metadata (pitchXMM, pitchYMM, stagger, column rotations, switch/cap presets, switch body keepout dims, anchors + optAnchors, per-finger travel).
 - QMK/VIA scaffolds: placeholders mapping physical positions to logical layers.
 - Static PNG/SVG preview export of the candidate layout.
 
 ## UI & Interaction Notes
 
 - Single-file app (HTML/CSS/JS) with no external network calls; all data stays local (localStorage export/import).
-- Multitouch via Pointer Events; visualize touch points with finger labels and trailing arcs.
-- Clear prompts, one-finger-at-a-time measurement UI with “Looks Good / Redo” checkpoints.
-- “Confidence bands” around measurements; allow quick retakes to refine noisy data.
-- Keyboard-agnostic: generate positions first; mapping to letters/layers is out of scope for the core flow (but export helps).
+- Touch support: Pointer Events with Touch Events fallback (iPad Safari compatible); desktop mouse mode for anchor capture.
+- Measurement UI: sample-based (tap to add samples), per-finger envelopes and “Redo” to clear current-finger samples.
+- “Confidence bands” from accumulated samples; quick retakes refine data.
+- Keyboard-agnostic: generate positions first; mapping to letters/layers is out of scope for the core flow (export helps).
 
 ## Assumptions & Non-Goals (for now)
 
@@ -123,6 +132,46 @@ A local, privacy-first, guided experience that:
 6) Results UI, quick tweaks, and exports (KLE/JSON/SVG; QMK/VIA later).
 7) Presets for switches and spacing (done): choose MX/Choc/LP, with spacing presets or custom mm.
 
----
+## Detailed Current UX and Features
 
-If this vision looks right, I’ll scaffold the single-file HTML/JS app next and focus first on the measurement flow (multitouch + homing + per-finger travel), then candidate generation and scoring.
+- Constraints & Presets
+  - Main-finger key count (per hand) and thumb-cluster key count (per hand).
+  - Column style: ortholinear vs column-staggered (auto-detected during measurement; overridable in review).
+  - Dominant hand and mirror/asymmetry preference.
+  - Switch presets: Cherry MX, Kailh Choc v1, Gateron LP, Redragon LP, Other.
+  - Keycap spacing presets (pitch): MX 1u (19.05×19.05 mm), Choc 1u (18×17 mm), LP (~18.8×18.0 mm), Custom (edit X/Y mm).
+  - Switch footprint (body keepout) with “lock to preset”; defaults include MX ≈14×14 mm, Choc v1 ≈15×15 mm.
+  - Optional DPI calibration using credit card width (85.60 mm) to improve mm accuracy.
+
+- Homing Capture
+  - Stable capture after ~2 seconds; snapshot persists after lifting the hand.
+  - Auto-labeling: thumb=farthest from centroid; others by x-order with dominant-hand direction.
+  - iPad Safari fixes: Touch Events fallback and canvas resize when the screen becomes visible; desktop “Mouse mode” available.
+
+- Measurement (“Add Samples”)
+  - Each touch-down adds a sample for the current finger only (others may rest on-screen).
+  - Envelope computed from samples in mm; sample count shown.
+  - Keycap overlay: columns for index/middle/ring/pinky; thumb-cluster keycaps as an arc using `thumbCount` and dominant hand.
+  - Optimized anchors recompute live from samples (vertical center, lateral median) with bounded shifts; overlay follows; status shows X/Y offset.
+
+- Candidate Generation & Results
+  - Uses optimized anchors when available (falls back to anchors).
+  - Heuristic column distribution and style-dependent vertical stagger; thumb cluster arc.
+  - Comfort scoring normalized by per-finger travel and finger strength; results canvas visualizes comfort.
+  - Review controls: tweak rows/style/switch & spacing presets; KLE/JSON exports.
+
+## Problems Tackled & UX Improvements
+
+- iPad Safari: canvas sizing + event handling → resize on screen entry; Touch Events fallback.
+- Lifting hand reset → stable snapshot (capturedPoints) persists; Continue stays enabled.
+- Inconsistent labeling → single algorithm both times (thumb=farthest from centroid; others by x-order with dominant hand).
+- Drag-only measurement → tap-to-capture samples; envelope from multiple samples; sample count.
+- Wrong-finger samples → capture only when new touch is nearest to the current finger’s anchor.
+- Static overlay → dynamic columns via optimized anchors; visible offset ring.
+- Missing thumb overlay → render thumb keycaps (arc) based on `thumbCount`.
+
+## Running & Deploying
+
+- Local server: `make serve` (http://127.0.0.1:5173), `make serve PORT=8080 OPEN=1`, or `./serve 5173 --open`.
+- Vercel: repo includes `vercel.json` (project name `ergomaker`).
+  - Connect GitHub repo in Vercel for auto-deploys, or use CLI: `npm i -g vercel`, `vercel login`, `vercel --prod --name ergomaker`.
