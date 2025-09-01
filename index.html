@@ -667,6 +667,24 @@
       // Assign thumb if not already labeled
       if (!pts[farIdx].finger) pts[farIdx].finger = 'thumb';
     }
+    function autoAssignFingers() {
+      if (!homing.capturedPoints || homing.capturedPoints.length < 4) return;
+      autoDetectThumb();
+      const pts = homing.capturedPoints;
+      const others = pts.map((p,i)=>({p,i})).filter(o=> o.p.finger !== 'thumb');
+      // Sort by x; for right hand: index→pinky left→right; for left hand reverse
+      others.sort((a,b)=> a.p.x - b.p.x);
+      if ((State.data.constraints?.dominant||'right') === 'left') others.reverse();
+      const labels = ['index','middle','ring','pinky'];
+      for (let i=0; i<Math.min(labels.length, others.length); i++) {
+        others[i].p.finger = labels[i];
+      }
+      const anchors = {};
+      pts.forEach(t=> { if (t.finger) anchors[t.finger] = { x: t.x, y: t.y }; });
+      State.set('homing.anchors', anchors);
+      drawTouches(ctxH, homing.touches);
+      updateHomingStatus();
+    }
     function labelFingersInteractively() {
       // Label captured points by clicking nearest point in order.
       // Auto-detect thumb first if not set.
@@ -738,22 +756,16 @@
     }
     btnHomingReset.addEventListener('click', ()=>{ homing = { touches: new Map(), stableSince: null, capturedPoints: null }; drawTouches(ctxH, homing.touches); updateHomingStatus(); });
     btnHomingContinue.addEventListener('click', ()=>{
-      // Require labeling to know which touch is which
       if (!State.data.homing.anchors) {
         // If not captured yet, snapshot from current touches
         if (!homing.capturedPoints || homing.capturedPoints.length === 0) {
           homing.capturedPoints = Array.from(homing.touches.values()).map(t=> ({ x: t.x, y: t.y, finger: null }));
           drawTouches(ctxH, homing.touches);
         }
-        autoDetectThumb();
-        labelFingersInteractively();
-        // Proceed to measurement after labeling completes
-        const wait = setInterval(()=>{
-          if (State.data.homing.anchors) { clearInterval(wait); showScreen('measure'); }
-        }, 200);
-      } else {
-        showScreen('measure');
+        // Auto label all fingers using geometry + dominant hand
+        autoAssignFingers();
       }
+      showScreen('measure');
     });
     btnHomingMouse.addEventListener('click', ()=>{
       labelByMouseClicks();
