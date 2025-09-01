@@ -785,6 +785,45 @@
     function initMeasure() { resizeCanvas(canvasMeasure); drawMeasure(); }
     window.addEventListener('resize', ()=>{ resizeCanvas(canvasMeasure); drawMeasure(); });
 
+    function detectStyleFromAnchors() {
+      const anchors = State.data.homing.anchors || {};
+      const fingers = ['index','middle','ring','pinky'];
+      const ys = fingers.map(f=> anchors[f]?.y).filter(v=> typeof v === 'number');
+      if (ys.length < 2) return (State.data.detectedStyle = 'ortholinear');
+      const pxmm = State.data.calib.pxPerMM || 3.78; const pitchYPx = (State.data.constraints.pitchYMM||19.05)*pxmm;
+      const minY = Math.min(...ys), maxY = Math.max(...ys);
+      const diff = maxY - minY;
+      const detected = diff <= (0.25 * pitchYPx) ? 'ortholinear' : 'column-staggered';
+      State.data.detectedStyle = detected; State.save();
+      return detected;
+    }
+    function drawKeycapsOverlay(ctx) {
+      const anchors = State.data.homing.anchors || {};
+      const pxmm = State.data.calib.pxPerMM || 3.78;
+      const pitchXPx = (State.data.constraints.pitchXMM||19.05) * pxmm;
+      const pitchYPx = (State.data.constraints.pitchYMM||19.05) * pxmm;
+      const rows = State.data.constraints.rows || 4;
+      const fingers = ['index','middle','ring','pinky'];
+      const shrink = 0.92; const w = pitchXPx*shrink; const h = pitchYPx*shrink; const r = 6;
+      const homeRow = Math.floor(rows/2);
+      fingers.forEach((f, idx)=>{
+        const a = anchors[f]; if (!a) return;
+        for (let row=0; row<rows; row++) {
+          const cx = a.x; const cy = a.y + (row - homeRow) * pitchYPx;
+          const x = cx - w/2; const y = cy - h/2;
+          ctx.beginPath();
+          ctx.moveTo(x+r, y); ctx.arcTo(x+w, y, x+w, y+h, r);
+          ctx.arcTo(x+w, y+h, x, y+h, r);
+          ctx.arcTo(x, y+h, x, y, r);
+          ctx.arcTo(x, y, x+w, y, r);
+          ctx.closePath();
+          const isCurrent = Fingers[measure.fingerIdx] === f;
+          ctx.fillStyle = isCurrent ? '#6dc2ff14' : '#ffffff10';
+          ctx.strokeStyle = isCurrent ? '#6dc2ff88' : '#9fb3c844';
+          ctx.lineWidth = 1.5; ctx.fill(); ctx.stroke();
+        }
+      });
+    }
     function drawMeasure() {
       const ctx = ctxM; ctx.clearRect(0,0,ctx.canvas.width, ctx.canvas.height);
       // grid
@@ -793,6 +832,9 @@
       for (let x=0; x<ctx.canvas.width; x+=32) { ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,ctx.canvas.height); ctx.stroke(); }
       for (let y=0; y<ctx.canvas.height; y+=32) { ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(ctx.canvas.width,y); ctx.stroke(); }
       ctx.globalAlpha = 1;
+      // keycaps overlay based on homing anchors
+      detectStyleFromAnchors();
+      drawKeycapsOverlay(ctx);
       // anchors
       const anchors = State.data.homing.anchors || {};
       const colors = {index:'#6dc2ff', middle:'#79e4b9', ring:'#ffcc66', pinky:'#ff6d6d', thumb:'#b38cff'};
@@ -920,7 +962,8 @@
       const lat = s? (s.latPx/pxmm).toFixed(1) : '0';
       const f = Fingers[measure.fingerIdx];
       const n = (measure.samples[f]||[]).length;
-      measureStatus.textContent = `Finger: ${f} · Up: ${up} mm · Down: ${down} mm · Lateral: ${lat} mm · Samples: ${n}`;
+      const det = State.data.detectedStyle || detectStyleFromAnchors();
+      measureStatus.textContent = `Finger: ${f} · Up: ${up} mm · Down: ${down} mm · Lateral: ${lat} mm · Samples: ${n} · Detected: ${det}`;
     }
     function commitMeasurement() {
       const s = measure.span; if (!s) return;
