@@ -389,7 +389,23 @@
 
     function showScreen(name) {
       $$(".screen").forEach(s => s.classList.remove('active'));
-      $(`#screen-${name}`).classList.add('active');
+      const el = $(`#screen-${name}`);
+      el.classList.add('active');
+      // Run screen entry hooks to ensure canvases size correctly after being shown
+      if (name === 'homing') {
+        initHoming();
+        homing = { touches: new Map(), stableSince: null };
+        updateHomingStatus();
+      }
+      if (name === 'measure') {
+        initMeasure();
+        measure.fingerIdx = 0; // start with index
+        measurePrompt.textContent = `Move the ${Fingers[measure.fingerIdx]} up/down, keep others steady. Tap Done when captured.`;
+        updateMeasureStatus();
+      }
+      if (name === 'results') {
+        refreshResults();
+      }
       window.scrollTo(0,0);
     }
 
@@ -1055,13 +1071,6 @@
       const blob = new Blob([exportCoords(State.data.layout)], {type:'application/json'});
       const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'ergomaker-layout.json'; a.click(); URL.revokeObjectURL(a.href);
     });
-
-    // Screen entry hooks
-    const screenObserver = new MutationObserver(()=>{
-      if ($('#screen-homing').classList.contains('active')) { initHoming(); homing = { touches: new Map(), stableSince: null }; updateHomingStatus(); }
-      if ($('#screen-measure').classList.contains('active')) { initMeasure(); }
-    });
-    screenObserver.observe($('#main'), { attributes:false, childList:true, subtree:true });
 
     // Direct navigation for dev convenience
     window.__app = { State, showScreen, refreshResults };
