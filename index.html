@@ -781,6 +781,36 @@
     const btnMeasureToResults = $('#btn-measure-to-results');
     let measure = { fingerIdx: 0, touches: new Map(), span: null, samples: {} };
 
+    function median(arr){ if(!arr.length) return 0; const s=[...arr].sort((a,b)=>a-b); const m=Math.floor(s.length/2); return s.length%2? s[m] : (s[m-1]+s[m])/2; }
+    function effAnchorFor(f){
+      const opt = (State.data.homing && State.data.homing.optAnchors) || {};
+      const base = (State.data.homing && State.data.homing.anchors) || {};
+      return opt[f] || base[f];
+    }
+    function recomputeOptimizedAnchors(){
+      const base = (State.data.homing && State.data.homing.anchors) || {};
+      const pxmm = State.data.calib.pxPerMM || 3.78;
+      const pitchXPx = (State.data.constraints.pitchXMM||19.05)*pxmm;
+      const pitchYPx = (State.data.constraints.pitchYMM||19.05)*pxmm;
+      const out = {};
+      ['index','middle','ring','pinky','thumb'].forEach(f=>{
+        const a = base[f]; if(!a) return;
+        const smp = measure.samples[f]||[];
+        if (smp.length>=2) {
+          const minY = Math.min(...smp.map(p=>p.y));
+          const maxY = Math.max(...smp.map(p=>p.y));
+          let y = (minY + maxY)/2;
+          const yMin = a.y - pitchYPx*0.6, yMax = a.y + pitchYPx*0.6; y = Math.max(yMin, Math.min(yMax, y));
+          let x = median(smp.map(p=>p.x));
+          const xMin = a.x - pitchXPx*0.4, xMax = a.x + pitchXPx*0.4; x = Math.max(xMin, Math.min(xMax, x));
+          out[f] = { x, y };
+        } else {
+          out[f] = a;
+        }
+      });
+      State.set('homing.optAnchors', out);
+    }
+
     function initMeasure() { resizeCanvas(canvasMeasure); drawMeasure(); }
     window.addEventListener('resize', ()=>{ resizeCanvas(canvasMeasure); drawMeasure(); });
 
@@ -806,7 +836,7 @@
       const shrink = 0.92; const w = pitchXPx*shrink; const h = pitchYPx*shrink; const r = 6;
       const homeRow = Math.floor(rows/2);
       fingers.forEach((f, idx)=>{
-        const a = anchors[f]; if (!a) return;
+        const a = effAnchorFor(f) || anchors[f]; if (!a) return;
         for (let row=0; row<rows; row++) {
           const cx = a.x; const cy = a.y + (row - homeRow) * pitchYPx;
           const x = cx - w/2; const y = cy - h/2;
@@ -834,7 +864,7 @@
       // keycaps overlay based on homing anchors
       detectStyleFromAnchors();
       drawKeycapsOverlay(ctx);
-      // anchors
+      // anchors (original) and show optimized ring for current finger
       const anchors = State.data.homing.anchors || {};
       const colors = {index:'#6dc2ff', middle:'#79e4b9', ring:'#ffcc66', pinky:'#ff6d6d', thumb:'#b38cff'};
       Object.entries(anchors).forEach(([finger, a])=>{
@@ -843,6 +873,11 @@
         ctx.fillStyle = '#cfe2ff'; ctx.font = '12px sans-serif'; ctx.textAlign='center'; ctx.textBaseline='bottom';
         ctx.fillText(finger, a.x, a.y-10);
       });
+      const cf = Fingers[measure.fingerIdx]; const aEff = effAnchorFor(cf); const aBase = anchors[cf];
+      if (aEff && aBase && (Math.abs(aEff.x-aBase.x)>1 || Math.abs(aEff.y-aBase.y)>1)) {
+        ctx.strokeStyle = colors[cf]||'#6dc2ff'; ctx.lineWidth = 2; ctx.globalAlpha = 0.9;
+        ctx.beginPath(); ctx.arc(aEff.x, aEff.y, 8, 0, Math.PI*2); ctx.stroke(); ctx.globalAlpha = 1;
+      }
       // draw samples for current finger
       const curFinger = Fingers[measure.fingerIdx];
       const smp = measure.samples[curFinger] || [];
@@ -884,6 +919,7 @@
       const a = anchors[finger]; if (!a) return;
       (measure.samples[finger] ||= []).push({ x, y, t: performance.now() });
       const s = computeSpanFromSamples(); if (s) measure.span = s;
+      recomputeOptimizedAnchors();
       drawMeasure(); updateMeasureStatus();
     }
     function measurePointerEvent(canvas, e) {
@@ -968,7 +1004,10 @@
       const f = Fingers[measure.fingerIdx];
       const n = (measure.samples[f]||[]).length;
       const det = State.data.detectedStyle || detectStyleFromAnchors();
-      measureStatus.textContent = `Finger: ${f} · Up: ${up} mm · Down: ${down} mm · Lateral: ${lat} mm · Samples: ${n} · Detected: ${det}`;
+      const aEff2 = effAnchorFor(f), aBase2 = (State.data.homing.anchors||{})[f];
+      const offY = aEff2 && aBase2 ? ((aEff2.y - aBase2.y)/pxmm).toFixed(1) : '0.0';
+      const offX = aEff2 && aBase2 ? ((aEff2.x - aBase2.x)/pxmm).toFixed(1) : '0.0';
+      measureStatus.textContent = `Finger: ${f} · Up: ${up} mm · Down: ${down} mm · Lateral: ${lat} mm · Samples: ${n} · Detected: ${det} · Offset: X ${offX} mm, Y ${offY} mm`;
     }
     function commitMeasurement() {
       const s = measure.span; if (!s) return;
@@ -993,19 +1032,22 @@
     } else {
       ['touchstart','touchmove','touchend','touchcancel'].forEach(type=> canvasMeasure.addEventListener(type, ev=> measureTouchEvent(canvasMeasure, ev), {passive:false}));
     }
-    btnMeasureRedo.addEventListener('click', ()=>{ const f = Fingers[measure.fingerIdx]; measure.samples[f] = []; measure.span = null; drawMeasure(); updateMeasureStatus(); });
+    btnMeasureRedo.addEventListener('click', ()=>{ const f = Fingers[measure.fingerIdx]; measure.samples[f] = []; measure.span = null; recomputeOptimizedAnchors(); drawMeasure(); updateMeasureStatus(); });
     btnMeasureDone.addEventListener('click', ()=> commitMeasurement());
     btnMeasureNext.addEventListener('click', ()=> advanceFinger());
     btnMeasureToResults.addEventListener('click', ()=> showScreen('results'));
     // When entering measure screen, initialize
     const obs = new MutationObserver(()=>{ if ($('#screen-measure').classList.contains('active')) { initMeasure(); measure.fingerIdx = 0; // start with index
+      recomputeOptimizedAnchors();
       measurePrompt.textContent = `Tap to add samples for ${Fingers[measure.fingerIdx]} (move to extremes, then tap). Others stay steady.`; updateMeasureStatus(); }
     });
     obs.observe($('#screen-measure'), { attributes:true, attributeFilter:['class'] });
 
     // Layout generation & scoring
     function generateCandidate(state) {
-      const anchors = state.homing.anchors; if (!anchors) return null;
+      const baseAnchors = state.homing.anchors; if (!baseAnchors) return null;
+      const opt = state.homing.optAnchors || {};
+      const anchors = Object.assign({}, baseAnchors, opt);
       const travel = state.travel; // up/down/lateral in mm
       const rows = state.constraints.rows;
       const pitchXMM = state.constraints.pitchXMM;
@@ -1089,7 +1131,8 @@
       ctx.clearRect(0,0,rect.width, rect.height);
       // draw keys with comfort coloring
       if (!layout) return;
-      const anchors = State.data.homing.anchors||{}; const travel = State.data.travel||{}; const pitchXMM = State.data.constraints.pitchXMM; const pitchYMM = State.data.constraints.pitchYMM; const pxmm = State.data.calib.pxPerMM||3.78;
+      const anchors = Object.assign({}, State.data.homing.anchors||{}, State.data.homing.optAnchors||{});
+      const travel = State.data.travel||{}; const pitchXMM = State.data.constraints.pitchXMM; const pitchYMM = State.data.constraints.pitchYMM; const pxmm = State.data.calib.pxPerMM||3.78;
       function keyCost(k){
         const a = anchors[k.finger] || anchors.index || {x: rect.width*0.4, y: rect.height*0.6};
         const dx = (k.x - a.x) / (travel[k.finger]?.lateral || (pitchXMM*0.7));
@@ -1200,6 +1243,7 @@
         switchFootWMM: State.data.constraints.switchFootWMM,
         switchFootHMM: State.data.constraints.switchFootHMM,
         anchors: State.data.homing.anchors,
+        optAnchors: State.data.homing.optAnchors || null,
         travel: State.data.travel,
         keys: layout.keys.map(k=>({ finger:k.finger, x: k.x, y: k.y, col:k.col, row:k.row, thumb: !!k.thumb }))
       }, null, 2);
