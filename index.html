@@ -1,0 +1,967 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ErgoMaker — Layout Finder</title>
+  <style>
+    :root {
+      --bg: #0b0f14;
+      --fg: #e6eef7;
+      --muted: #9fb3c8;
+      --accent: #6dc2ff;
+      --accent-2: #79e4b9;
+      --warn: #ffb36d;
+      --danger: #ff6d6d;
+      --panel: #111720;
+      --panel-2: #141c28;
+      --btn: #192234;
+      --btn-hover: #22314a;
+      --grid: #263142;
+      --good: #40d17a;
+      --mid: #ffcc66;
+      --bad: #ff6d6d;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; height: 100%; background: var(--bg); color: var(--fg); font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji"; }
+    a { color: var(--accent); text-decoration: none; }
+    .app { display: grid; grid-template-rows: auto 1fr auto; height: 100%; }
+    header { padding: 12px 16px; border-bottom: 1px solid var(--grid); background: var(--panel); display: flex; align-items: center; gap: 12px; }
+    header h1 { font-size: 16px; margin: 0; letter-spacing: 0.3px; }
+    header .tag { font-size: 12px; color: var(--muted); }
+    main { position: relative; overflow: hidden; }
+    .screen { display: none; height: 100%; }
+    .screen.active { display: grid; grid-template-rows: auto 1fr auto; height: 100%; }
+    .content { padding: 16px; overflow: auto; }
+    .panel { background: var(--panel-2); border: 1px solid var(--grid); border-radius: 12px; padding: 16px; }
+    .row { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
+    .row label { min-width: 220px; color: var(--muted); }
+    .row input[type="number"], .row select { background: var(--btn); color: var(--fg); border: 1px solid var(--grid); border-radius: 8px; padding: 8px 10px; width: 140px; }
+    .row input[type="range"] { width: 240px; }
+    .hint { font-size: 12px; color: var(--muted); }
+    .buttons { display: flex; justify-content: space-between; gap: 8px; padding: 10px 16px; border-top: 1px solid var(--grid); background: var(--panel); }
+    .btn { background: var(--btn); color: var(--fg); border: 1px solid var(--grid); border-radius: 10px; padding: 10px 14px; cursor: pointer; }
+    .btn.primary { background: var(--accent); color: #072338; border-color: transparent; }
+    .btn:hover { background: var(--btn-hover); }
+    .btn.primary:hover { filter: brightness(1.05); }
+    .center { display: grid; place-items: center; }
+    .lead { font-size: 18px; color: var(--fg); margin: 0 0 10px 0; }
+    .sub { color: var(--muted); margin: 0 0 18px 0; }
+
+    /* Canvas + overlay */
+    .canvas-wrap { position: relative; height: 100%; background: #0a0f15; border-top: 1px solid var(--grid); }
+    canvas { width: 100%; height: 100%; display: block; background: #0a0f15; touch-action: none; }
+    .overlay { position: absolute; inset: 0; pointer-events: none; }
+    .overlay .prompt { position: absolute; left: 16px; top: 16px; background: #0c1320cc; border: 1px solid var(--grid); color: var(--fg); padding: 10px 12px; border-radius: 10px; max-width: 460px; font-size: 14px; }
+    .overlay .status { position: absolute; right: 16px; top: 16px; background: #0c1320cc; border: 1px solid var(--grid); color: var(--muted); padding: 8px 10px; border-radius: 10px; font-size: 12px; text-align: right; }
+    .overlay .footer { position: absolute; left: 16px; bottom: 16px; background: #0c1320cc; border: 1px solid var(--grid); color: var(--muted); padding: 8px 10px; border-radius: 10px; font-size: 12px; }
+    .legend { display: flex; gap: 8px; align-items: center; }
+    .chip { padding: 4px 8px; border-radius: 999px; border: 1px solid var(--grid); background: var(--panel-2); color: var(--muted); font-size: 12px; }
+    .chip.good { color: var(--good); }
+    .chip.mid { color: var(--mid); }
+    .chip.bad { color: var(--bad); }
+
+    .grid { display: grid; gap: 12px; }
+    @media (min-width: 900px) {
+      .grid.cols-2 { grid-template-columns: 1fr 1fr; }
+    }
+
+    .kbd { display: inline-grid; gap: 6px; grid-auto-flow: column; }
+    .key { width: 40px; height: 40px; border-radius: 6px; border: 1px solid var(--grid); background: #0e1522; display: grid; place-items: center; font-size: 12px; color: var(--muted); }
+
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; }
+    textarea.code { width: 100%; min-height: 180px; background: #0a0f15; color: var(--fg); border: 1px solid var(--grid); border-radius: 10px; padding: 10px; }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header>
+      <h1>ErgoMaker</h1>
+      <span class="tag">Guided split keyboard layout finder</span>
+      <div style="margin-left:auto" class="legend">
+        <span class="chip good">comfortable</span>
+        <span class="chip mid">ok</span>
+        <span class="chip bad">hard</span>
+      </div>
+    </header>
+    <main id="main">
+      <!-- Welcome -->
+      <section class="screen active" id="screen-welcome">
+        <div class="content center">
+          <div class="panel" style="max-width: 860px;">
+            <p class="lead">Design an ergonomic split layout tailored to your hand.</p>
+            <p class="sub">Guided, privacy-first, multitouch measurements. Function over form.</p>
+            <div class="grid cols-2">
+              <div>
+                <h3>What we'll do</h3>
+                <ul>
+                  <li>Ask your key counts and style</li>
+                  <li>Capture your homing posture</li>
+                  <li>Measure comfortable travel per finger</li>
+                  <li>Generate and score candidate layouts</li>
+                  <li>Export KLE JSON and coordinates</li>
+                </ul>
+              </div>
+              <div>
+                <h3>Good to know</h3>
+                <ul>
+                  <li>No network, everything stays local</li>
+                  <li>Works best on a phone/tablet</li>
+                  <li>Optional mm calibration for accuracy</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="buttons">
+          <button class="btn" id="btn-reset">Reset</button>
+          <div>
+            <button class="btn primary" id="btn-start">Start</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Constraints -->
+      <section class="screen" id="screen-constraints">
+        <div class="content">
+          <div class="panel" style="max-width: 900px; margin: 0 auto;">
+            <h3>Constraints & Preferences</h3>
+            <div class="row">
+              <label for="mainCount">Main-finger keys (per hand)</label>
+              <input type="number" id="mainCount" min="20" max="60" step="1" value="34" />
+              <span class="hint">Typical: 30–42</span>
+            </div>
+            <div class="row">
+              <label for="thumbCount">Thumb-cluster keys (per hand)</label>
+              <input type="number" id="thumbCount" min="1" max="6" step="1" value="3" />
+              <span class="hint">Typical: 2–5</span>
+            </div>
+            <div class="row">
+              <label for="rows">Rows (main grid)</label>
+              <select id="rows">
+                <option value="3">3 rows</option>
+                <option value="4" selected>4 rows</option>
+              </select>
+              <span class="hint">Used to interpret up/down travel</span>
+            </div>
+            <div class="row">
+              <label for="style">Column style</label>
+              <select id="style">
+                <option value="ortholinear">Ortholinear</option>
+                <option value="column-staggered" selected>Column-staggered</option>
+              </select>
+            </div>
+            <div class="row">
+              <label for="dominant">Dominant hand (measure first)</label>
+              <select id="dominant">
+                <option value="right" selected>Right</option>
+                <option value="left">Left</option>
+              </select>
+              <span class="hint">We’ll mirror to the other hand by default</span>
+            </div>
+            <div class="row">
+              <label for="mirror">Symmetry</label>
+              <select id="mirror">
+                <option value="mirror" selected>Mirror dominant hand</option>
+                <option value="asymmetric">Allow per-hand differences</option>
+              </select>
+            </div>
+            <div class="row">
+              <label for="switchPreset">Switch preset</label>
+              <select id="switchPreset"></select>
+              <span class="hint">Choose MX, Choc, or low-profile family</span>
+            </div>
+            <div class="row">
+              <label for="capPreset">Keycap spacing</label>
+              <select id="capPreset"></select>
+              <span class="hint">Sets pitch from cap spacing (e.g., MX 19.05×19.05, Choc 18×17)</span>
+            </div>
+            <div class="row">
+              <label for="lockFoot">Switch footprint</label>
+              <input type="checkbox" id="lockFoot" checked />
+              <span class="hint">Lock to preset</span>
+              <input type="number" id="footW" min="10" max="20" step="0.1" value="14.0" />
+              <span class="hint">W (mm)</span>
+              <input type="number" id="footH" min="10" max="20" step="0.1" value="14.0" />
+              <span class="hint">H (mm)</span>
+            </div>
+            <div class="row custom-pitch" style="display:none;">
+              <label for="pitchX">Horizontal pitch (mm)</label>
+              <input type="number" id="pitchX" min="14" max="22" step="0.05" value="19.05" />
+              <span class="hint">Distance between columns</span>
+            </div>
+            <div class="row custom-pitch" style="display:none;">
+              <label for="pitchY">Vertical pitch (mm)</label>
+              <input type="number" id="pitchY" min="14" max="22" step="0.05" value="19.05" />
+              <span class="hint">Distance between rows</span>
+            </div>
+            <p class="hint">You can refine these later during review.</p>
+          </div>
+        </div>
+        <div class="buttons">
+          <button class="btn" data-back="welcome">Back</button>
+          <div>
+            <button class="btn" id="btn-calibrate-skip">Skip calibration</button>
+            <button class="btn primary" id="btn-calibrate">Calibrate (mm)</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Calibration -->
+      <section class="screen" id="screen-calibration">
+        <div class="content center">
+          <div class="panel" style="max-width: 760px;">
+            <h3>Quick Calibration (Optional)</h3>
+            <p class="sub">Match the blue line to the width of a standard credit card (85.60 mm) for accurate mm↔px conversion.</p>
+            <div class="center" style="padding: 24px 0;">
+              <div id="calibBarWrap" style="width: 85.6mm; max-width: 92vw;">
+                <div style="display:flex; align-items:center; gap:12px;">
+                  <div id="calibBar" style="height: 8px; background: var(--accent); border-radius: 6px; flex: 1;"></div>
+                  <input type="range" id="calibPx" min="50" max="800" value="320" />
+                </div>
+                <div class="hint" id="calibHint">Width: <span id="calibPxVal" class="mono">320</span> px ≈ 85.6 mm → <span id="calibScale" class="mono">3.74</span> px/mm</div>
+              </div>
+            </div>
+            <p class="hint">If you skip this step, defaults are used and pitch is approximate.</p>
+          </div>
+        </div>
+        <div class="buttons">
+          <button class="btn" data-back="constraints">Back</button>
+          <div>
+            <button class="btn" id="btn-calib-skip-2">Skip</button>
+            <button class="btn primary" id="btn-to-homing">Continue</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Homing posture -->
+      <section class="screen" id="screen-homing">
+        <div class="canvas-wrap">
+          <canvas id="canvasHoming"></canvas>
+          <div class="overlay">
+            <div class="prompt" id="homingPrompt">
+              Place your dominant-hand fingertips and thumb naturally on the canvas. Keep them steady for 2 seconds.
+            </div>
+            <div class="status" id="homingStatus">Touches: 0 · Stable: 0.0s</div>
+            <div class="footer">Tip: Use a phone/tablet for true multitouch. Desktop supports sequential mode.</div>
+          </div>
+        </div>
+        <div class="buttons">
+          <button class="btn" data-back="constraints">Back</button>
+          <div>
+            <button class="btn" id="btn-homing-reset">Reset</button>
+            <button class="btn primary" id="btn-homing-continue" disabled>Continue</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Finger travel measurement -->
+      <section class="screen" id="screen-measure">
+        <div class="canvas-wrap">
+          <canvas id="canvasMeasure"></canvas>
+          <div class="overlay">
+            <div class="prompt" id="measurePrompt">Move the highlighted finger up and down, keep others steady. Tap Done when comfortable range is captured.</div>
+            <div class="status" id="measureStatus">Finger: index · Up: 0 mm · Down: 0 mm · Lateral: 0 mm</div>
+          </div>
+        </div>
+        <div class="buttons">
+          <button class="btn" data-back="homing">Back</button>
+          <div>
+            <button class="btn" id="btn-measure-redo">Redo</button>
+            <button class="btn" id="btn-measure-done">Done</button>
+            <button class="btn" id="btn-measure-next">Next finger</button>
+            <button class="btn primary" id="btn-measure-to-results" disabled>To Results</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Results & export -->
+      <section class="screen" id="screen-results">
+        <div class="content">
+          <div class="panel" style="margin-bottom: 12px;">
+            <h3>Candidate Layout</h3>
+            <div class="row">
+              <label>Rows</label>
+              <select id="reviewRows"></select>
+            </div>
+            <div class="row">
+              <label>Style</label>
+              <select id="reviewStyle"></select>
+            </div>
+            <div class="row">
+              <label>Switch preset</label>
+              <select id="reviewSwitch"></select>
+            </div>
+            <div class="row">
+              <label>Keycap spacing</label>
+              <select id="reviewCap"></select>
+            </div>
+            <div class="row review-custom-pitch" style="display:none;">
+              <label>Horizontal pitch (mm)</label>
+              <input type="number" id="reviewPitchX" min="14" max="22" step="0.05" />
+            </div>
+            <div class="row review-custom-pitch" style="display:none;">
+              <label>Vertical pitch (mm)</label>
+              <input type="number" id="reviewPitchY" min="14" max="22" step="0.05" />
+            </div>
+            <div class="row">
+              <label>Clearance (pitch - footprint)</label>
+              <span id="clearanceText" class="hint">–</span>
+            </div>
+          </div>
+          <div class="panel">
+            <div class="grid cols-2">
+              <div>
+                <canvas id="canvasResult" style="width:100%; height:380px; background:#0a0f15; border-radius:10px; border:1px solid var(--grid);"></canvas>
+              </div>
+              <div>
+                <h4>Export</h4>
+                <div class="row">
+                  <button class="btn" id="btn-export-kle">Copy KLE JSON</button>
+                  <button class="btn" id="btn-export-json">Copy Coordinates JSON</button>
+                  <button class="btn" id="btn-download">Download .json</button>
+                </div>
+                <textarea class="code mono" id="exportArea" readonly></textarea>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="buttons">
+          <button class="btn" data-back="measure">Back</button>
+          <div>
+            <button class="btn" id="btn-results-tweak">Regenerate</button>
+            <button class="btn primary" id="btn-finish">Finish</button>
+          </div>
+        </div>
+      </section>
+    </main>
+    <footer class="buttons" style="justify-content:center;">
+      <span class="hint">Local-only • No tracking • v0.1</span>
+    </footer>
+  </div>
+
+  <script>
+    // Simple state & storage
+    const $ = (sel, root=document) => root.querySelector(sel);
+    const $$ = (sel, root=document) => Array.from(root.querySelectorAll(sel));
+    const Screens = ["welcome", "constraints", "calibration", "homing", "measure", "results"]; 
+    const Fingers = ["index", "middle", "ring", "pinky", "thumb"]; // measurement order
+
+    const Store = {
+      load() {
+        try { return JSON.parse(localStorage.getItem('ergomaker')||'{}'); } catch { return {}; }
+      },
+      save(data) { localStorage.setItem('ergomaker', JSON.stringify(data)); }
+    };
+
+    const State = {
+      data: Object.assign({
+        constraints: {
+          mainCount: 34,
+          thumbCount: 3,
+          rows: 4,
+          style: 'column-staggered',
+          dominant: 'right',
+          mirror: 'mirror',
+          switchPreset: 'cherry_mx',
+          capPreset: 'mx_1u',
+          pitchXMM: 19.05,
+          pitchYMM: 19.05,
+          switchFootWMM: 14.0,
+          switchFootHMM: 14.0,
+          lockSwitchFoot: true,
+        },
+        calib: { pxPerMM: 3.78 }, // ~96 dpi ≈ 3.78 px/mm
+        homing: { anchors: null }, // {finger: {x,y}} in canvas px
+        travel: {}, // {finger: {up: mm, down: mm, lateral: mm}}
+        layout: null,
+      }, Store.load()),
+      save() { Store.save(this.data); },
+      set(path, value) {
+        const parts = path.split('.');
+        let obj = this.data; for (let i=0; i<parts.length-1; i++) obj = obj[parts[i]] ||= {};
+        obj[parts.at(-1)] = value; this.save();
+      }
+    };
+
+    function showScreen(name) {
+      $$(".screen").forEach(s => s.classList.remove('active'));
+      $(`#screen-${name}`).classList.add('active');
+      window.scrollTo(0,0);
+    }
+
+    // Welcome
+    $('#btn-start').addEventListener('click', ()=> showScreen('constraints'));
+    $('#btn-reset').addEventListener('click', ()=> { localStorage.removeItem('ergomaker'); location.reload(); });
+    $$('[data-back]').forEach(btn=> btn.addEventListener('click', (e)=> showScreen(btn.dataset.back)));
+
+    // Constraints
+    const mainCountEl = $('#mainCount');
+    const thumbCountEl = $('#thumbCount');
+    const rowsEl = $('#rows');
+    const styleEl = $('#style');
+    const dominantEl = $('#dominant');
+    const mirrorEl = $('#mirror');
+    const switchPresetEl = $('#switchPreset');
+    const capPresetEl = $('#capPreset');
+    const pitchXEl = $('#pitchX');
+    const pitchYEl = $('#pitchY');
+    const lockFootEl = $('#lockFoot');
+    const footWEl = $('#footW');
+    const footHEl = $('#footH');
+
+    const SwitchPresets = {
+      'cherry_mx': { name: 'Cherry MX (standard)', cap: 'mx_1u', foot: { w: 14.0, h: 14.0 } },
+      'kailh_choc_v1': { name: 'Kailh Choc v1 (low-profile)', cap: 'choc_1u', foot: { w: 15.0, h: 15.0 } },
+      'gateron_lp': { name: 'Gateron Low Profile', cap: 'lp_moderate', foot: { w: 14.0, h: 14.0 } },
+      'redragon_lp': { name: 'Redragon Low Profile', cap: 'lp_moderate', foot: { w: 14.0, h: 14.0 } },
+      'other': { name: 'Other / Custom', cap: 'custom', foot: { w: 14.0, h: 14.0 } },
+    };
+    const CapPresets = {
+      'mx_1u': { name: 'MX 1u (19.05 × 19.05 mm)', x: 19.05, y: 19.05 },
+      'choc_1u': { name: 'Choc 1u (18.0 × 17.0 mm)', x: 18.0, y: 17.0 },
+      'lp_moderate': { name: 'Low-profile 1u (~18.8 × 18.0 mm)', x: 18.8, y: 18.0 },
+      'custom': { name: 'Custom…', x: 19.0, y: 19.0 },
+    };
+    function populateSelect(el, optionsMap, selected) {
+      el.innerHTML = '';
+      Object.entries(optionsMap).forEach(([value, obj])=>{
+        const opt = document.createElement('option');
+        opt.value = value; opt.textContent = obj.name; if (value===selected) opt.selected = true; el.appendChild(opt);
+      });
+    }
+    function showCustomPitchRows(show) {
+      $$('.custom-pitch').forEach(r => r.style.display = show? 'flex' : 'none');
+    }
+    function syncConstraintsToUI() {
+      const c = State.data.constraints;
+      mainCountEl.value = c.mainCount;
+      thumbCountEl.value = c.thumbCount;
+      rowsEl.value = String(c.rows);
+      styleEl.value = c.style;
+      dominantEl.value = c.dominant;
+      mirrorEl.value = c.mirror;
+      populateSelect(switchPresetEl, SwitchPresets, c.switchPreset);
+      populateSelect(capPresetEl, CapPresets, c.capPreset);
+      pitchXEl.value = c.pitchXMM;
+      pitchYEl.value = c.pitchYMM;
+      showCustomPitchRows(c.capPreset === 'custom');
+      lockFootEl.checked = !!c.lockSwitchFoot;
+      footWEl.value = c.switchFootWMM;
+      footHEl.value = c.switchFootHMM;
+      footWEl.disabled = footHEl.disabled = !!c.lockSwitchFoot;
+    }
+    syncConstraintsToUI();
+    [mainCountEl, thumbCountEl, rowsEl, styleEl, dominantEl, mirrorEl].forEach(el=>{
+      el.addEventListener('input', ()=>{
+        const c = State.data.constraints;
+        c.mainCount = +mainCountEl.value;
+        c.thumbCount = +thumbCountEl.value;
+        c.rows = +rowsEl.value;
+        c.style = styleEl.value;
+        c.dominant = dominantEl.value;
+        c.mirror = mirrorEl.value;
+        State.save();
+      });
+    });
+    switchPresetEl.addEventListener('change', ()=>{
+      const c = State.data.constraints;
+      c.switchPreset = switchPresetEl.value;
+      // Apply recommended cap spacing
+      const recommended = SwitchPresets[c.switchPreset]?.cap || 'mx_1u';
+      c.capPreset = recommended;
+      const cp = CapPresets[recommended];
+      if (cp) { c.pitchXMM = cp.x; c.pitchYMM = cp.y; }
+      // Apply recommended footprint if locked
+      if (c.lockSwitchFoot) {
+        const foot = SwitchPresets[c.switchPreset]?.foot; if (foot) { c.switchFootWMM = foot.w; c.switchFootHMM = foot.h; }
+      }
+      State.save();
+      syncConstraintsToUI();
+    });
+    capPresetEl.addEventListener('change', ()=>{
+      const c = State.data.constraints;
+      c.capPreset = capPresetEl.value;
+      const cp = CapPresets[c.capPreset];
+      if (cp && c.capPreset !== 'custom') { c.pitchXMM = cp.x; c.pitchYMM = cp.y; }
+      State.save();
+      syncConstraintsToUI();
+    });
+    [pitchXEl, pitchYEl].forEach(el=> el.addEventListener('input', ()=>{
+      const c = State.data.constraints;
+      c.pitchXMM = +pitchXEl.value; c.pitchYMM = +pitchYEl.value; c.capPreset = 'custom';
+      State.save();
+      syncConstraintsToUI();
+    }));
+    lockFootEl.addEventListener('change', ()=>{
+      const c = State.data.constraints; c.lockSwitchFoot = lockFootEl.checked;
+      if (c.lockSwitchFoot) {
+        const foot = SwitchPresets[c.switchPreset]?.foot; if (foot) { c.switchFootWMM = foot.w; c.switchFootHMM = foot.h; }
+      }
+      State.save(); syncConstraintsToUI();
+    });
+    [footWEl, footHEl].forEach(el=> el.addEventListener('input', ()=>{
+      const c = State.data.constraints; c.lockSwitchFoot = false; c.switchFootWMM = +footWEl.value; c.switchFootHMM = +footHEl.value;
+      State.save(); syncConstraintsToUI();
+    }));
+
+    // Calibration
+    $('#btn-calibrate').addEventListener('click', ()=> showScreen('calibration'));
+    $('#btn-calibrate-skip').addEventListener('click', ()=> showScreen('homing'));
+    $('#btn-calib-skip-2').addEventListener('click', ()=> showScreen('homing'));
+    const calibPx = $('#calibPx');
+    const calibPxVal = $('#calibPxVal');
+    const calibScale = $('#calibScale');
+    const pxPerMMFromSlider = () => (+calibPx.value)/85.6; // px / mm
+    const applyCalib = () => {
+      const pxmm = pxPerMMFromSlider();
+      calibPxVal.textContent = calibPx.value;
+      calibScale.textContent = pxmm.toFixed(2);
+      State.set('calib.pxPerMM', pxmm);
+    };
+    calibPx.addEventListener('input', applyCalib);
+    applyCalib();
+    $('#btn-to-homing').addEventListener('click', ()=> showScreen('homing'));
+
+    // Homing posture: multitouch capture
+    const canvasHoming = $('#canvasHoming');
+    const ctxH = canvasHoming.getContext('2d');
+    const homingStatus = $('#homingStatus');
+    const btnHomingContinue = $('#btn-homing-continue');
+    const btnHomingReset = $('#btn-homing-reset');
+    let homing = { touches: new Map(), stableSince: null };
+
+    function resizeCanvas(c) {
+      const dpr = window.devicePixelRatio || 1;
+      const rect = c.getBoundingClientRect();
+      c.width = Math.round(rect.width * dpr);
+      c.height = Math.round(rect.height * dpr);
+      const ctx = c.getContext('2d');
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
+    function drawTouches(ctx, touches) {
+      ctx.clearRect(0,0,ctx.canvas.width, ctx.canvas.height);
+      // grid
+      ctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue('--grid');
+      ctx.lineWidth = 1; ctx.globalAlpha = 0.6;
+      for (let x=0; x<ctx.canvas.width; x+=32) { ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,ctx.canvas.height); ctx.stroke(); }
+      for (let y=0; y<ctx.canvas.height; y+=32) { ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(ctx.canvas.width,y); ctx.stroke(); }
+      ctx.globalAlpha = 1;
+      // touches
+      let i=0; const colors = {index:'#6dc2ff', middle:'#79e4b9', ring:'#ffcc66', pinky:'#ff6d6d', thumb:'#b38cff'};
+      touches.forEach(t=>{
+        const r = 18; ctx.beginPath(); ctx.arc(t.x, t.y, r, 0, Math.PI*2);
+        ctx.fillStyle = (colors[t.finger]||'#6dc2ff'); ctx.globalAlpha=0.2; ctx.fill(); ctx.globalAlpha=1;
+        ctx.lineWidth = 2; ctx.strokeStyle = ctx.fillStyle; ctx.stroke();
+        ctx.fillStyle = '#cfe2ff'; ctx.font = '12px sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
+        ctx.fillText(t.finger||('T'+(++i)), t.x, t.y);
+      });
+    }
+    function updateHomingStatus() {
+      const count = homing.touches.size;
+      const stableFor = homing.stableSince? ((performance.now() - homing.stableSince)/1000).toFixed(1) : '0.0';
+      homingStatus.textContent = `Touches: ${count} · Stable: ${stableFor}s`;
+      const ok = count >= 4 && Number(stableFor) >= 2.0; // 4+ contacts (thumb + 3 fingers minimum)
+      btnHomingContinue.disabled = !ok;
+    }
+    function homingPointerEvent(canvas, e) {
+      e.preventDefault();
+      const rect = canvas.getBoundingClientRect();
+      const x = e.clientX - rect.left; const y = e.clientY - rect.top;
+      if (e.type === 'pointerdown') canvas.setPointerCapture(e.pointerId);
+      if (e.type === 'pointerdown' || e.type === 'pointermove') {
+        homing.touches.set(e.pointerId, { id: e.pointerId, x, y, finger: null });
+      }
+      if (e.type === 'pointerup' || e.type === 'pointercancel') {
+        homing.touches.delete(e.pointerId);
+      }
+      // stability: if positions change a lot, reset stableSince
+      const now = performance.now();
+      const prev = homing._last || new Map();
+      let unstable = false;
+      homing.touches.forEach((t, id)=>{
+        const p = prev.get(id);
+        if (!p) return;
+        const dx = t.x - p.x, dy = t.y - p.y;
+        if (Math.hypot(dx,dy) > 6) unstable = true;
+      });
+      if (!homing.stableSince || unstable || homing.touches.size !== prev.size) homing.stableSince = now;
+      homing._last = new Map(homing.touches);
+      drawTouches(ctxH, homing.touches);
+      updateHomingStatus();
+    }
+    function labelFingersInteractively() {
+      // If multitouch present, let user tap labels in order to assign fingers to the 5 nearest contacts.
+      const order = ['thumb','index','middle','ring','pinky'];
+      let step = 0;
+      const prompt = $('#homingPrompt');
+      prompt.textContent = 'Tap the contact for: ' + order[step];
+      function onClick(ev){
+        const rect = canvasHoming.getBoundingClientRect();
+        const x = ev.clientX - rect.left; const y = ev.clientY - rect.top;
+        // find nearest touch
+        let nearestId = null; let best = Infinity;
+        homing.touches.forEach((t, id)=>{ const d = (t.x-x)**2 + (t.y-y)**2; if (d<best) { best=d; nearestId=id; } });
+        if (nearestId==null) return;
+        homing.touches.get(nearestId).finger = order[step];
+        drawTouches(ctxH, homing.touches);
+        step++;
+        if (step<order.length) {
+          prompt.textContent = 'Tap the contact for: ' + order[step];
+        } else {
+          canvasHoming.removeEventListener('click', onClick);
+          prompt.textContent = 'Great! Anchors captured.';
+          // Save anchors by finger name
+          const anchors = {};
+          homing.touches.forEach(t=>{ if (t.finger) anchors[t.finger] = {x:t.x, y:t.y}; });
+          State.set('homing.anchors', anchors);
+        }
+      }
+      canvasHoming.addEventListener('click', onClick);
+    }
+    function initHoming() {
+      resizeCanvas(canvasHoming);
+      drawTouches(ctxH, new Map());
+    }
+    initHoming();
+    window.addEventListener('resize', ()=>{ resizeCanvas(canvasHoming); drawTouches(ctxH, homing.touches); });
+    ['pointerdown','pointermove','pointerup','pointercancel'].forEach(type=> canvasHoming.addEventListener(type, ev=> homingPointerEvent(canvasHoming, ev), {passive:false}));
+    btnHomingReset.addEventListener('click', ()=>{ homing = { touches: new Map(), stableSince: null }; drawTouches(ctxH, homing.touches); updateHomingStatus(); });
+    btnHomingContinue.addEventListener('click', ()=>{
+      // Require labeling to know which touch is which
+      if (!State.data.homing.anchors) {
+        labelFingersInteractively();
+        // Proceed to measurement after labeling completes
+        const wait = setInterval(()=>{
+          if (State.data.homing.anchors) { clearInterval(wait); showScreen('measure'); }
+        }, 200);
+      } else {
+        showScreen('measure');
+      }
+    });
+
+    // Measurement
+    const canvasMeasure = $('#canvasMeasure');
+    const ctxM = canvasMeasure.getContext('2d');
+    const measureStatus = $('#measureStatus');
+    const measurePrompt = $('#measurePrompt');
+    const btnMeasureNext = $('#btn-measure-next');
+    const btnMeasureDone = $('#btn-measure-done');
+    const btnMeasureRedo = $('#btn-measure-redo');
+    const btnMeasureToResults = $('#btn-measure-to-results');
+    let measure = { fingerIdx: 0, touches: new Map(), span: null };
+
+    function initMeasure() { resizeCanvas(canvasMeasure); drawMeasure(); }
+    window.addEventListener('resize', ()=>{ resizeCanvas(canvasMeasure); drawMeasure(); });
+
+    function drawMeasure() {
+      const ctx = ctxM; ctx.clearRect(0,0,ctx.canvas.width, ctx.canvas.height);
+      // grid
+      ctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue('--grid');
+      ctx.lineWidth = 1; ctx.globalAlpha = 0.6;
+      for (let x=0; x<ctx.canvas.width; x+=32) { ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,ctx.canvas.height); ctx.stroke(); }
+      for (let y=0; y<ctx.canvas.height; y+=32) { ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(ctx.canvas.width,y); ctx.stroke(); }
+      ctx.globalAlpha = 1;
+      // anchors
+      const anchors = State.data.homing.anchors || {};
+      const colors = {index:'#6dc2ff', middle:'#79e4b9', ring:'#ffcc66', pinky:'#ff6d6d', thumb:'#b38cff'};
+      Object.entries(anchors).forEach(([finger, a])=>{
+        ctx.beginPath(); ctx.arc(a.x, a.y, 6, 0, Math.PI*2);
+        ctx.fillStyle = colors[finger]||'#6dc2ff'; ctx.globalAlpha = 0.9; ctx.fill(); ctx.globalAlpha = 1;
+        ctx.fillStyle = '#cfe2ff'; ctx.font = '12px sans-serif'; ctx.textAlign='center'; ctx.textBaseline='bottom';
+        ctx.fillText(finger, a.x, a.y-10);
+      });
+      // if span present draw envelopes
+      if (measure.span) {
+        const s = measure.span; const a = anchors[s.finger];
+        if (a) {
+          ctx.strokeStyle = colors[s.finger];
+          ctx.setLineDash([6,6]);
+          ctx.beginPath(); ctx.moveTo(a.x, a.y - s.upPx); ctx.lineTo(a.x, a.y + s.downPx); ctx.stroke();
+          ctx.setLineDash([]);
+          ctx.fillStyle = '#ffffff20';
+          ctx.fillRect(a.x - s.latPx, a.y - s.upPx, s.latPx*2, s.upPx + s.downPx);
+        }
+      }
+    }
+    function measurePointerEvent(canvas, e) {
+      e.preventDefault();
+      const rect = canvas.getBoundingClientRect(); const x = e.clientX - rect.left; const y = e.clientY - rect.top;
+      if (e.type === 'pointerdown') canvas.setPointerCapture(e.pointerId);
+      if (e.type === 'pointerdown' || e.type === 'pointermove') measure.touches.set(e.pointerId, { id:e.pointerId, x, y });
+      if (e.type === 'pointerup' || e.type === 'pointercancel') measure.touches.delete(e.pointerId);
+      // compute span for active finger relative to homing anchor
+      const finger = Fingers[measure.fingerIdx];
+      const anchors = State.data.homing.anchors || {};
+      const a = anchors[finger];
+      if (a) {
+        // find active touch nearest to anchor
+        let best=null, bid=null, dBest=Infinity; measure.touches.forEach((t, id)=>{ const d = (t.x-a.x)**2 + (t.y-a.y)**2; if (d<dBest){ dBest=d; best=t; bid=id; } });
+        if (best) {
+          const upPx = Math.max(0, a.y - best.y); // upwards on screen decreases y
+          const downPx = Math.max(0, best.y - a.y);
+          const latPx = Math.abs(best.x - a.x);
+          measure.span = { finger, upPx, downPx, latPx };
+        }
+      }
+      drawMeasure();
+      updateMeasureStatus();
+    }
+    function updateMeasureStatus() {
+      const pxmm = State.data.calib.pxPerMM || 3.78;
+      const s = measure.span;
+      const up = s? (s.upPx/pxmm).toFixed(1) : '0';
+      const down = s? (s.downPx/pxmm).toFixed(1) : '0';
+      const lat = s? (s.latPx/pxmm).toFixed(1) : '0';
+      measureStatus.textContent = `Finger: ${Fingers[measure.fingerIdx]} · Up: ${up} mm · Down: ${down} mm · Lateral: ${lat} mm`;
+    }
+    function commitMeasurement() {
+      const s = measure.span; if (!s) return;
+      const pxmm = State.data.calib.pxPerMM || 3.78;
+      const entry = { up: (s.upPx/pxmm), down: (s.downPx/pxmm), lateral: (s.latPx/pxmm) };
+      State.data.travel[s.finger] = entry; State.save();
+      // enable results if all fingers measured at least once
+      const haveAll = Fingers.every(f=> State.data.travel[f]);
+      btnMeasureToResults.disabled = !haveAll;
+    }
+    function advanceFinger() {
+      commitMeasurement();
+      measure.span = null; measure.touches.clear();
+      measure.fingerIdx = Math.min(measure.fingerIdx + 1, Fingers.length-1);
+      drawMeasure();
+      measurePrompt.textContent = `Move the ${Fingers[measure.fingerIdx]} up/down, keep others steady. Tap Done when captured.`;
+      updateMeasureStatus();
+      if (measure.fingerIdx === Fingers.length-1) btnMeasureNext.disabled = true; else btnMeasureNext.disabled = false;
+    }
+    ['pointerdown','pointermove','pointerup','pointercancel'].forEach(type=> canvasMeasure.addEventListener(type, ev=> measurePointerEvent(canvasMeasure, ev), {passive:false}));
+    btnMeasureRedo.addEventListener('click', ()=>{ measure.span = null; drawMeasure(); updateMeasureStatus(); });
+    btnMeasureDone.addEventListener('click', ()=> commitMeasurement());
+    btnMeasureNext.addEventListener('click', ()=> advanceFinger());
+    btnMeasureToResults.addEventListener('click', ()=> showScreen('results'));
+    // When entering measure screen, initialize
+    const obs = new MutationObserver(()=>{ if ($('#screen-measure').classList.contains('active')) { initMeasure(); measure.fingerIdx = 0; // start with index
+      measurePrompt.textContent = `Move the ${Fingers[measure.fingerIdx]} up/down, keep others steady. Tap Done when captured.`; updateMeasureStatus(); }
+    });
+    obs.observe($('#screen-measure'), { attributes:true, attributeFilter:['class'] });
+
+    // Layout generation & scoring
+    function generateCandidate(state) {
+      const anchors = state.homing.anchors; if (!anchors) return null;
+      const travel = state.travel; // up/down/lateral in mm
+      const rows = state.constraints.rows;
+      const pitchXMM = state.constraints.pitchXMM;
+      const pitchYMM = state.constraints.pitchYMM;
+      const pxmm = state.calib.pxPerMM || 3.78;
+      const style = state.constraints.style;
+      const mainCount = state.constraints.mainCount;
+      // Determine columns per finger based on mainCount and rows
+      const desiredColsTotal = Math.max(3, Math.round(mainCount / rows));
+      // ratio index→pinky, give more to index/middle
+      const baseRatios = [1.3, 1.2, 1.0, 0.7]; // index, middle, ring, pinky
+      let sum = baseRatios.reduce((a,b)=>a+b,0);
+      let cols = baseRatios.map(r => Math.max(1, Math.round(r/sum * desiredColsTotal)));
+      // Adjust to match total
+      let diff = desiredColsTotal - cols.reduce((a,b)=>a+b,0);
+      while (diff !== 0) {
+        if (diff>0) { let i = cols.indexOf(Math.max(...cols)); cols[i]++; diff--; }
+        else { let i = cols.indexOf(Math.max(...cols)); if (cols[i]>1) { cols[i]--; diff++; } else break; }
+      }
+      const fingersOrder = ['index','middle','ring','pinky'];
+      const colsMap = {}; for (let i=0;i<fingersOrder.length;i++) colsMap[fingersOrder[i]] = cols[i] || 1;
+      // Generate key centers per finger as columns x rows grid around anchor with style offsets
+      const layout = { keys: [], meta: { rows, pitchXMM, pitchYMM, style, colsMap, switchPreset: state.constraints.switchPreset, spacingPreset: state.constraints.spacingPreset } };
+      const pitchXPx = pitchXMM * pxmm;
+      const pitchYPx = pitchYMM * pxmm;
+      const staggerPerCol = style === 'column-staggered' ? [ -0.6, -0.3, 0, 0.2, 0.4, 0.6 ] : [0,0,0,0,0,0]; // in row units
+      const anchorLineY = anchors.index?.y ?? anchors.middle?.y ?? 200;
+      const rowOffsetY = (r) => (r - Math.floor(rows/2)) * pitchYPx;
+      const colXAccum = { index: 0, middle: 0, ring: 0, pinky: 0 };
+      const colIdxBase = { index: 0, middle: 0, ring: 0, pinky: 0 };
+      const fingersSeq = ['index','middle','ring','pinky'];
+      fingersSeq.forEach(f=>{
+        const fCols = colsMap[f];
+        const anchor = anchors[f] || {x: (anchors.index?.x||200), y: anchorLineY};
+        // arrange columns around anchor.x, favor medial columns closer
+        const startX = anchor.x - (fCols-1)*0.5*pitchXPx;
+        for (let c=0; c<fCols; c++) {
+          const cx = startX + c*pitchXPx;
+          for (let r=0; r<rows; r++) {
+            const stagger = staggerPerCol[c % staggerPerCol.length] * pitchYPx;
+            const cy = anchor.y + rowOffsetY(r) + stagger;
+            layout.keys.push({ hand: 'dominant', finger: f, x: cx, y: cy, col: c, row: r });
+          }
+        }
+      });
+      // Add a simple thumb arc near thumb anchor
+      const th = anchors.thumb || {x: (anchors.index?.x||200) - pitchXPx, y: (anchors.index?.y||200) + pitchYPx*1.2};
+      const thumbCount = state.constraints.thumbCount;
+      const thumbRadius = Math.min(pitchXPx, pitchYPx)*0.9; const thumbAngleStart = Math.PI*0.15; const thumbSweep = Math.PI*0.6;
+      for (let i=0;i<thumbCount;i++) {
+        const t = i/(Math.max(1,thumbCount-1));
+        const ang = thumbAngleStart + t*thumbSweep;
+        const tx = th.x + Math.cos(ang)*thumbRadius;
+        const ty = th.y + Math.sin(ang)*thumbRadius;
+        layout.keys.push({ hand: 'dominant', finger: 'thumb', x: tx, y: ty, col: i, row: 0, thumb: true });
+      }
+      // Score comfort: lower is better
+      function costFor(key) {
+        const a = anchors[key.finger] || th; // thumb fallback
+        const dx = (key.x - a.x) / (travel[key.finger]?.lateral || (pitchXMM*0.7));
+        const dy = (key.y - a.y);
+        const up = Math.max(0, -dy) / (travel[key.finger]?.up || (pitchYMM*0.8));
+        const down = Math.max(0, dy) / (travel[key.finger]?.down || (pitchYMM*0.9));
+        const dirPenalty = 1 + (dy < 0 ? 0.3 : 0.1); // extension slightly harsher
+        // finger strength weights
+        const fingerW = { index: 0.9, middle: 1.0, ring: 1.2, pinky: 1.5, thumb: 0.8 }[key.finger] || 1.0;
+        const base = Math.hypot(dx, (dy<0?up:down));
+        return base * dirPenalty * fingerW;
+      }
+      let total = 0; layout.keys.forEach(k=> total += costFor(k));
+      layout.score = total / layout.keys.length;
+      return layout;
+    }
+
+    // Results rendering
+    const canvasResult = $('#canvasResult');
+    const ctxR = canvasResult.getContext('2d');
+    function drawResult(layout) {
+      const ctx = ctxR; const dpr = window.devicePixelRatio||1; const rect = canvasResult.getBoundingClientRect();
+      canvasResult.width = rect.width * dpr; canvasResult.height = rect.height * dpr; ctx.setTransform(dpr,0,0,dpr,0,0);
+      ctx.clearRect(0,0,rect.width, rect.height);
+      // draw keys with comfort coloring
+      if (!layout) return;
+      const anchors = State.data.homing.anchors||{}; const travel = State.data.travel||{}; const pitchXMM = State.data.constraints.pitchXMM; const pitchYMM = State.data.constraints.pitchYMM; const pxmm = State.data.calib.pxPerMM||3.78;
+      function keyCost(k){
+        const a = anchors[k.finger] || anchors.index || {x: rect.width*0.4, y: rect.height*0.6};
+        const dx = (k.x - a.x) / (travel[k.finger]?.lateral || (pitchXMM*0.7));
+        const dy = (k.y - a.y);
+        const up = Math.max(0, -dy) / (travel[k.finger]?.up || (pitchYMM*0.8));
+        const down = Math.max(0, dy) / (travel[k.finger]?.down || (pitchYMM*0.9));
+        return Math.hypot(dx, (dy<0?up:down));
+      }
+      const colors = (c)=> c<0.7? '#40d17a' : c<1.2? '#ffcc66' : '#ff6d6d';
+      layout.keys.forEach(k=>{
+        const size = Math.min(pitchXMM, pitchYMM)*pxmm*0.95; const x = k.x - size/2; const y = k.y - size/2;
+        const cost = keyCost(k);
+        ctx.fillStyle = colors(cost); ctx.strokeStyle = '#263142'; ctx.lineWidth = 1.5;
+        const r = 6; ctx.beginPath();
+        ctx.moveTo(x+r, y); ctx.arcTo(x+size, y, x+size, y+size, r);
+        ctx.arcTo(x+size, y+size, x, y+size, r);
+        ctx.arcTo(x, y+size, x, y, r);
+        ctx.arcTo(x, y, x+size, y, r);
+        ctx.closePath(); ctx.fill(); ctx.stroke();
+      });
+      // anchors
+      Object.entries(anchors).forEach(([f, a])=>{ ctx.fillStyle = '#9fb3c8'; ctx.beginPath(); ctx.arc(a.x, a.y, 4, 0, Math.PI*2); ctx.fill(); });
+      // score text
+      ctx.fillStyle = '#9fb3c8'; ctx.font = '12px sans-serif'; ctx.fillText(`Score: ${layout.score.toFixed(3)} (lower is better)`, 10, 18);
+    }
+
+    function refreshResults() {
+      const layout = generateCandidate(State.data);
+      State.set('layout', layout);
+      drawResult(layout);
+      // sync review controls
+      $('#reviewRows').innerHTML = `<option value="3" ${State.data.constraints.rows===3?'selected':''}>3 rows</option><option value="4" ${State.data.constraints.rows===4?'selected':''}>4 rows</option>`;
+      $('#reviewStyle').innerHTML = `<option value="ortholinear" ${State.data.constraints.style==='ortholinear'?'selected':''}>Ortholinear</option><option value="column-staggered" ${State.data.constraints.style!=='ortholinear'?'selected':''}>Column-staggered</option>`;
+      populateSelect($('#reviewSwitch'), SwitchPresets, State.data.constraints.switchPreset);
+      populateSelect($('#reviewCap'), CapPresets, State.data.constraints.capPreset);
+      $('#reviewPitchX').value = State.data.constraints.pitchXMM;
+      $('#reviewPitchY').value = State.data.constraints.pitchYMM;
+      $$('.review-custom-pitch').forEach(r => r.style.display = State.data.constraints.capPreset === 'custom' ? 'flex' : 'none');
+      // Clearance text
+      const xClr = (State.data.constraints.pitchXMM - State.data.constraints.switchFootWMM).toFixed(2);
+      const yClr = (State.data.constraints.pitchYMM - State.data.constraints.switchFootHMM).toFixed(2);
+      const clrEl = $('#clearanceText');
+      clrEl.textContent = `X: ${xClr} mm, Y: ${yClr} mm`;
+      clrEl.style.color = (+xClr < 0 || +yClr < 0) ? getComputedStyle(document.documentElement).getPropertyValue('--danger') : getComputedStyle(document.documentElement).getPropertyValue('--muted');
+    }
+
+    // Wire results controls
+    $('#reviewRows').addEventListener('change', (e)=>{ State.data.constraints.rows = +e.target.value; State.save(); refreshResults(); });
+    $('#reviewStyle').addEventListener('change', (e)=>{ State.data.constraints.style = e.target.value; State.save(); refreshResults(); });
+    $('#btn-results-tweak').addEventListener('click', refreshResults);
+    $('#reviewSwitch').addEventListener('change', (e)=>{
+      const c = State.data.constraints; c.switchPreset = e.target.value;
+      const recommended = SwitchPresets[c.switchPreset]?.cap || 'mx_1u';
+      c.capPreset = recommended; const cp = CapPresets[recommended]; if (cp) { c.pitchXMM = cp.x; c.pitchYMM = cp.y; }
+      if (c.lockSwitchFoot) { const foot = SwitchPresets[c.switchPreset]?.foot; if (foot) { c.switchFootWMM = foot.w; c.switchFootHMM = foot.h; } }
+      State.save(); refreshResults();
+    });
+    $('#reviewCap').addEventListener('change', (e)=>{
+      const c = State.data.constraints; c.capPreset = e.target.value; const cp = CapPresets[c.capPreset];
+      if (cp && c.capPreset !== 'custom') { c.pitchXMM = cp.x; c.pitchYMM = cp.y; }
+      State.save(); refreshResults();
+    });
+    $('#reviewPitchX').addEventListener('input', (e)=>{ State.data.constraints.pitchXMM = +e.target.value; State.data.constraints.capPreset = 'custom'; State.save(); refreshResults(); });
+    $('#reviewPitchY').addEventListener('input', (e)=>{ State.data.constraints.pitchYMM = +e.target.value; State.data.constraints.capPreset = 'custom'; State.save(); refreshResults(); });
+
+    // Move to results when all fingers measured (index, middle, ring, pinky, thumb)
+    $('#btn-finish').addEventListener('click', ()=> alert('Session saved. You can tweak and export.'));
+
+    // Transition to results when we leave measurement via Next on last finger
+    const measureToResultsObs = new MutationObserver(()=>{
+      if ($('#screen-results').classList.contains('active')) refreshResults();
+    });
+    measureToResultsObs.observe($('#screen-results'), { attributes:true, attributeFilter:['class'] });
+
+    // Navigation: when measurement complete, show results
+    // For simplicity, allow manual navigation using buttons
+
+    // Export
+    function exportKLE(layout) {
+      // Minimal KLE: array of rows; we will map our positions to a grid relative to anchor with 1u keys
+      // For this prototype, emit absolute coordinates in a custom field and basic KLE rows approximated by rounding
+      const pxmm = State.data.calib.pxPerMM||3.78; const uPxX = State.data.constraints.pitchXMM * pxmm; const uPxY = State.data.constraints.pitchYMM * pxmm;
+      // Build rows by rounding y to nearest unit
+      const rowsMap = new Map();
+      layout.keys.forEach(k=>{
+        const ry = Math.round(k.y / uPxY);
+        const rx = Math.round(k.x / uPxX);
+        const key = { x: rx, y: ry, l: '' };
+        if (!rowsMap.has(ry)) rowsMap.set(ry, []);
+        rowsMap.get(ry).push(key);
+      });
+      const rows = Array.from(rowsMap.entries()).sort((a,b)=>a[0]-b[0]).map(([ry, arr])=> arr.sort((a,b)=>a.x-b.x).map(k=>({"x":0, "y":0, "w":1, "h":1, "label":""})));
+      // In addition, include our coordinates in a custom field
+      return JSON.stringify({
+        meta: { note: 'ErgoMaker prototype export', pitchXMM: State.data.constraints.pitchXMM, pitchYMM: State.data.constraints.pitchYMM, switchPreset: State.data.constraints.switchPreset, capPreset: State.data.constraints.capPreset, switchFootWMM: State.data.constraints.switchFootWMM, switchFootHMM: State.data.constraints.switchFootHMM },
+        rows,
+        coordinates: layout.keys.map(k=>({ finger:k.finger, x:k.x, y:k.y }))
+      }, null, 2);
+    }
+    function exportCoords(layout) {
+      return JSON.stringify({
+        pitchXMM: State.data.constraints.pitchXMM,
+        pitchYMM: State.data.constraints.pitchYMM,
+        rows: State.data.constraints.rows,
+        style: State.data.constraints.style,
+        switchPreset: State.data.constraints.switchPreset,
+        capPreset: State.data.constraints.capPreset,
+        switchFootWMM: State.data.constraints.switchFootWMM,
+        switchFootHMM: State.data.constraints.switchFootHMM,
+        anchors: State.data.homing.anchors,
+        travel: State.data.travel,
+        keys: layout.keys.map(k=>({ finger:k.finger, x: k.x, y: k.y, col:k.col, row:k.row, thumb: !!k.thumb }))
+      }, null, 2);
+    }
+    function copyToClipboard(text) { navigator.clipboard?.writeText(text).catch(()=>{}); $('#exportArea').value = text; }
+    $('#btn-export-kle').addEventListener('click', ()=>{ const t = exportKLE(State.data.layout); copyToClipboard(t); });
+    $('#btn-export-json').addEventListener('click', ()=>{ const t = exportCoords(State.data.layout); copyToClipboard(t); });
+    $('#btn-download').addEventListener('click', ()=>{
+      const blob = new Blob([exportCoords(State.data.layout)], {type:'application/json'});
+      const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'ergomaker-layout.json'; a.click(); URL.revokeObjectURL(a.href);
+    });
+
+    // Screen entry hooks
+    const screenObserver = new MutationObserver(()=>{
+      if ($('#screen-homing').classList.contains('active')) { initHoming(); homing = { touches: new Map(), stableSince: null }; updateHomingStatus(); }
+      if ($('#screen-measure').classList.contains('active')) { initMeasure(); }
+    });
+    screenObserver.observe($('#main'), { attributes:false, childList:true, subtree:true });
+
+    // Direct navigation for dev convenience
+    window.__app = { State, showScreen, refreshResults };
+  </script>
+</body>
+</html>

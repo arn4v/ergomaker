@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Simple static file server for this directory.
+# Usage: ./serve [port] [--open]
+# - Defaults to port 5173 and host 127.0.0.1
+# - Uses python3 http.server if available; falls back to python, then node
+
+PORT="${1:-5173}"
+HOST="127.0.0.1"
+OPEN_FLAG="${2:-}"
+
+URL="http://${HOST}:${PORT}"
+
+open_url() {
+  local url="$1"
+  if [[ "${OPEN_FLAG}" == "--open" ]]; then
+    if command -v open >/dev/null 2>&1; then
+      (sleep 0.2; open "$url") &
+    elif command -v xdg-open >/dev/null 2>&1; then
+      (sleep 0.2; xdg-open "$url") &
+    fi
+  fi
+}
+
+echo "Serving $(pwd) at ${URL}"
+open_url "$URL"
+
+if command -v python3 >/dev/null 2>&1; then
+  exec python3 -m http.server "$PORT" --bind "$HOST"
+elif command -v python >/dev/null 2>&1; then
+  # Python 2 fallback
+  exec python -m SimpleHTTPServer "$PORT"
+elif command -v node >/dev/null 2>&1; then
+  # Minimal Node server as last resort
+  node -e '
+    const http = require("http"), fs = require("fs"), path = require("path");
+    const host = process.env.HOST || "127.0.0.1";
+    const port = Number(process.argv[2]||5173);
+    const root = process.cwd();
+    const types = {".html":"text/html",".js":"application/javascript",".css":"text/css",".json":"application/json",".svg":"image/svg+xml",".png":"image/png"};
+    const server = http.createServer((req,res)=>{
+      let filePath = path.join(root, decodeURI(req.url.split("?")[0]));
+      if (req.url === "/" || filePath.endsWith(path.sep)) filePath = path.join(root, "index.html");
+      fs.readFile(filePath, (err, data)=>{
+        if (err) { res.writeHead(404); res.end("Not found"); return; }
+        const ext = path.extname(filePath).toLowerCase();
+        res.writeHead(200, {"Content-Type": types[ext] || "application/octet-stream"});
+        res.end(data);
+      });
+    });
+    server.listen(port, host, ()=> console.log(`Static server running at http://${host}:${port}`));
+  ' "$PORT"
+else
+  echo "Please install python3 or node to use the dev server." >&2
+  exit 1
+fi
+
