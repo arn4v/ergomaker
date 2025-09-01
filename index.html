@@ -134,6 +134,11 @@
               <span class="hint">Typical: 30–42</span>
             </div>
             <div class="row">
+              <label for="gridPreset">Main grid preset</label>
+              <select id="gridPreset"></select>
+              <span id="totalKeysHint" class="hint">—</span>
+            </div>
+            <div class="row">
               <label for="thumbCount">Thumb-cluster keys (per hand)</label>
               <input type="number" id="thumbCount" min="1" max="6" step="1" value="3" />
               <span class="hint">Typical: 2–5</span>
@@ -145,6 +150,21 @@
                 <option value="4" selected>4 rows</option>
               </select>
               <span class="hint">Used to interpret up/down travel</span>
+            </div>
+            <div class="row custom-cols" style="display:none;">
+              <label for="colsPerHand">Columns (per hand)</label>
+              <input type="number" id="colsPerHand" min="3" max="8" step="1" value="5" />
+              <span class="hint">Main grid columns per hand</span>
+            </div>
+            <div class="row" id="extraColsRow" style="display:none;">
+              <label for="extraColsTarget">Extra columns to</label>
+              <select id="extraColsTarget">
+                <option value="index" selected>Index</option>
+                <option value="pinky">Pinky</option>
+                <option value="split">Split index+pinky</option>
+                <option value="auto">Auto</option>
+              </select>
+              <span class="hint">When columns not divisible by 4</span>
             </div>
             <div class="row">
               <label for="style">Column style</label>
@@ -363,6 +383,9 @@
           mainCount: 34,
           thumbCount: 3,
           rows: 4,
+          colsPerHand: 5,
+          gridPreset: 'custom',
+          extraColsTarget: 'index',
           style: 'column-staggered',
           dominant: 'right',
           mirror: 'mirror',
@@ -416,8 +439,12 @@
 
     // Constraints
     const mainCountEl = $('#mainCount');
+    const gridPresetEl = $('#gridPreset');
     const thumbCountEl = $('#thumbCount');
     const rowsEl = $('#rows');
+    const colsPerHandEl = $('#colsPerHand');
+    const extraColsTargetEl = $('#extraColsTarget');
+    const totalKeysHintEl = $('#totalKeysHint');
     const styleEl = $('#style');
     const dominantEl = $('#dominant');
     const mirrorEl = $('#mirror');
@@ -452,11 +479,38 @@
     function showCustomPitchRows(show) {
       $$('.custom-pitch').forEach(r => r.style.display = show? 'flex' : 'none');
     }
+    const GridPresets = {
+      '3x5_+2': { name: '3×5 + 2 (per hand) → 34 total', rows: 3, cols: 5, thumb: 2 },
+      '3x6_+3': { name: '3×6 + 3 (per hand) → 42 total', rows: 3, cols: 6, thumb: 3 },
+      '4x6_+3': { name: '4×6 + 3 (per hand) → 54 total', rows: 4, cols: 6, thumb: 3 },
+      'custom': { name: 'Custom…' }
+    };
+    function updateTotalKeysHint() {
+      const c = State.data.constraints;
+      const mainPerHand = (c.rows||0) * (c.colsPerHand||0);
+      const perHand = mainPerHand + (c.thumbCount||0);
+      const total = 2 * perHand;
+      if (totalKeysHintEl) totalKeysHintEl.textContent = `${total} total keys`;
+    }
+    function showCustomCols(show) {
+      $$('.custom-cols').forEach(r => r.style.display = show? 'flex' : 'none');
+    }
+    function maybeShowExtraCols() {
+      const c = State.data.constraints;
+      const remainder = (c.colsPerHand||0) % 4;
+      const row = $('#extraColsRow'); if (!row) return;
+      row.style.display = remainder === 0 ? 'none' : 'flex';
+    }
     function syncConstraintsToUI() {
       const c = State.data.constraints;
       mainCountEl.value = c.mainCount;
+      populateSelect(gridPresetEl, GridPresets, c.gridPreset||'custom');
       thumbCountEl.value = c.thumbCount;
       rowsEl.value = String(c.rows);
+      if (colsPerHandEl) colsPerHandEl.value = c.colsPerHand || 5;
+      if (extraColsTargetEl) extraColsTargetEl.value = c.extraColsTarget || 'index';
+      updateTotalKeysHint();
+      maybeShowExtraCols();
       styleEl.value = c.style;
       dominantEl.value = c.dominant;
       mirrorEl.value = c.mirror;
@@ -469,6 +523,7 @@
       footWEl.value = c.switchFootWMM;
       footHEl.value = c.switchFootHMM;
       footWEl.disabled = footHEl.disabled = !!c.lockSwitchFoot;
+      showCustomCols((c.gridPreset||'custom') === 'custom');
     }
     syncConstraintsToUI();
     [mainCountEl, thumbCountEl, rowsEl, styleEl, dominantEl, mirrorEl].forEach(el=>{
@@ -481,8 +536,23 @@
         c.dominant = dominantEl.value;
         c.mirror = mirrorEl.value;
         State.save();
+        updateTotalKeysHint();
+        maybeShowExtraCols();
       });
     });
+    rowsEl.addEventListener('change', ()=>{ const c = State.data.constraints; c.mainCount = c.rows * (c.colsPerHand||5); State.save(); syncConstraintsToUI(); });
+    if (gridPresetEl) gridPresetEl.addEventListener('change', ()=>{
+      const gp = gridPresetEl.value; const c = State.data.constraints; c.gridPreset = gp;
+      const preset = GridPresets[gp];
+      if (preset && gp !== 'custom') {
+        c.rows = preset.rows; c.colsPerHand = preset.cols; c.thumbCount = preset.thumb; c.mainCount = c.rows * c.colsPerHand;
+      }
+      State.save(); syncConstraintsToUI();
+    });
+    if (colsPerHandEl) colsPerHandEl.addEventListener('input', ()=>{
+      const c = State.data.constraints; c.colsPerHand = Math.max(3, Math.min(8, +colsPerHandEl.value||5)); c.mainCount = c.rows * c.colsPerHand; c.gridPreset = 'custom'; State.save(); syncConstraintsToUI();
+    });
+    if (extraColsTargetEl) extraColsTargetEl.addEventListener('change', ()=>{ State.data.constraints.extraColsTarget = extraColsTargetEl.value; State.save(); });
     switchPresetEl.addEventListener('change', ()=>{
       const c = State.data.constraints;
       c.switchPreset = switchPresetEl.value;
@@ -1080,21 +1150,21 @@
       const pitchYMM = state.constraints.pitchYMM;
       const pxmm = state.calib.pxPerMM || 3.78;
       const style = state.constraints.style;
-      const mainCount = state.constraints.mainCount;
-      // Determine columns per finger based on mainCount and rows
-      const desiredColsTotal = Math.max(3, Math.round(mainCount / rows));
-      // ratio index→pinky, give more to index/middle
-      const baseRatios = [1.3, 1.2, 1.0, 0.7]; // index, middle, ring, pinky
-      let sum = baseRatios.reduce((a,b)=>a+b,0);
-      let cols = baseRatios.map(r => Math.max(1, Math.round(r/sum * desiredColsTotal)));
-      // Adjust to match total
-      let diff = desiredColsTotal - cols.reduce((a,b)=>a+b,0);
-      while (diff !== 0) {
-        if (diff>0) { let i = cols.indexOf(Math.max(...cols)); cols[i]++; diff--; }
-        else { let i = cols.indexOf(Math.max(...cols)); if (cols[i]>1) { cols[i]--; diff++; } else break; }
+      const colsPerHand = state.constraints.colsPerHand || Math.max(3, Math.round((state.constraints.mainCount||rows*5)/rows));
+      const basePerFinger = Math.max(0, Math.floor(colsPerHand/4));
+      let remainder = colsPerHand - basePerFinger*4;
+      const target = state.constraints.extraColsTarget || 'index';
+      const colsMap = { index: basePerFinger, middle: basePerFinger, ring: basePerFinger, pinky: basePerFinger };
+      if (remainder > 0) {
+        if (target === 'index') colsMap.index += remainder;
+        else if (target === 'pinky') colsMap.pinky += remainder;
+        else if (target === 'split') { colsMap.index += Math.ceil(remainder/2); colsMap.pinky += Math.floor(remainder/2); }
+        else {
+          const order = ['index','middle','ring','pinky'];
+          let i = 0; while (remainder-- > 0) { colsMap[order[i%order.length]]++; i++; }
+        }
       }
       const fingersOrder = ['index','middle','ring','pinky'];
-      const colsMap = {}; for (let i=0;i<fingersOrder.length;i++) colsMap[fingersOrder[i]] = cols[i] || 1;
       // Generate key centers per finger as columns x rows grid around anchor with style offsets
       const layout = { keys: [], meta: { rows, pitchXMM, pitchYMM, style, colsMap, switchPreset: state.constraints.switchPreset, spacingPreset: state.constraints.spacingPreset } };
       const pitchXPx = pitchXMM * pxmm;
