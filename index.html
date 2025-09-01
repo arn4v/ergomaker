@@ -616,7 +616,7 @@
       const stableForSec = homing.stableSince ? (now - homing.stableSince)/1000 : 0;
       if (!homing.capturedPoints && homing.touches.size >= 4 && stableForSec >= 2.0) {
         homing.capturedPoints = Array.from(homing.touches.values()).map(t=> ({ x: t.x, y: t.y, finger: null }));
-        autoDetectThumb();
+        autoAssignFingers();
       }
       homing._last = new Map(homing.touches);
       drawTouches(ctxH, homing.touches);
@@ -650,7 +650,7 @@
       const stableForSec = homing.stableSince ? (now - homing.stableSince)/1000 : 0;
       if (!homing.capturedPoints && homing.touches.size >= 4 && stableForSec >= 2.0) {
         homing.capturedPoints = Array.from(homing.touches.values()).map(t=> ({ x: t.x, y: t.y, finger: null }));
-        autoDetectThumb();
+        autoAssignFingers();
       }
       homing._last = new Map(homing.touches);
       drawTouches(ctxH, homing.touches);
@@ -669,24 +669,15 @@
     }
     function autoAssignFingers() {
       if (!homing.capturedPoints || homing.capturedPoints.length < 4) return;
+      // Ensure thumb is labeled first
       autoDetectThumb();
       const pts = homing.capturedPoints;
-      const thumb = pts.find(p=> p.finger === 'thumb');
-      const others = pts.map((p,i)=>({p,i})).filter(o=> o.p.finger !== 'thumb');
-      if (!thumb || others.length < 3) return;
-      // 1) Pick index as the non-thumb point closest to the thumb (more robust than pure x-order)
-      let idxIdx = 0, best = Infinity;
-      others.forEach((o,i)=>{ const d = (o.p.x-thumb.x)**2 + (o.p.y-thumb.y)**2; if (d < best) { best = d; idxIdx = i; } });
-      const indexPoint = others[idxIdx].p; indexPoint.finger = 'index';
-      // 2) Assign remaining by x-order relative to index, using dominant hand for direction
-      const rest = others.filter((_,i)=> i !== idxIdx).map(o=>o.p);
       const rightHand = (State.data.constraints?.dominant||'right') !== 'left';
-      rest.sort((a,b)=> (a.x - indexPoint.x) - (b.x - indexPoint.x));
-      // For left hand, reverse direction away from index
-      const seq = rightHand ? rest : rest.slice().reverse();
-      const labels = ['middle','ring','pinky'];
-      for (let i=0;i<Math.min(labels.length, seq.length); i++) seq[i].finger = labels[i];
-      // Build anchors
+      // Take non-thumb points and sort by x (screen coordinates)
+      const others = pts.filter(p=> p.finger !== 'thumb').sort((a,b)=> a.x - b.x);
+      // For right hand: left->right = index, middle, ring, pinky; for left hand reverse
+      const labels = rightHand ? ['index','middle','ring','pinky'] : ['pinky','ring','middle','index'];
+      for (let i=0; i<others.length && i<labels.length; i++) others[i].finger = labels[i];
       const anchors = {};
       pts.forEach(t=> { if (t.finger) anchors[t.finger] = { x: t.x, y: t.y }; });
       State.set('homing.anchors', anchors);
