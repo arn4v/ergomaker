@@ -768,7 +768,7 @@
     const btnMeasureDone = $('#btn-measure-done');
     const btnMeasureRedo = $('#btn-measure-redo');
     const btnMeasureToResults = $('#btn-measure-to-results');
-    let measure = { fingerIdx: 0, touches: new Map(), span: null };
+    let measure = { fingerIdx: 0, touches: new Map(), span: null, samples: {} };
 
     function initMeasure() { resizeCanvas(canvasMeasure); drawMeasure(); }
     window.addEventListener('resize', ()=>{ resizeCanvas(canvasMeasure); drawMeasure(); });
@@ -790,6 +790,14 @@
         ctx.fillStyle = '#cfe2ff'; ctx.font = '12px sans-serif'; ctx.textAlign='center'; ctx.textBaseline='bottom';
         ctx.fillText(finger, a.x, a.y-10);
       });
+      // draw samples for current finger
+      const curFinger = Fingers[measure.fingerIdx];
+      const smp = measure.samples[curFinger] || [];
+      if (smp.length) {
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = colors[curFinger] || '#6dc2ff';
+        smp.forEach(p=>{ ctx.beginPath(); ctx.arc(p.x, p.y, 4, 0, Math.PI*2); ctx.fill(); });
+      }
       // if span present draw envelopes
       if (measure.span) {
         const s = measure.span; const a = anchors[s.finger];
@@ -803,10 +811,32 @@
         }
       }
     }
+    function computeSpanFromSamples() {
+      const finger = Fingers[measure.fingerIdx];
+      const anchors = State.data.homing.anchors || {};
+      const a = anchors[finger]; if (!a) return null;
+      const smp = measure.samples[finger] || [];
+      if (!smp.length) return null;
+      let upPx = 0, downPx = 0, latPx = 0;
+      smp.forEach(p=>{
+        const dy = p.y - a.y; const dx = p.x - a.x;
+        if (dy < 0) upPx = Math.max(upPx, -dy); else downPx = Math.max(downPx, dy);
+        latPx = Math.max(latPx, Math.abs(dx));
+      });
+      return { finger, upPx, downPx, latPx };
+    }
+    function captureSampleAt(x, y) {
+      const finger = Fingers[measure.fingerIdx];
+      const anchors = State.data.homing.anchors || {};
+      const a = anchors[finger]; if (!a) return;
+      (measure.samples[finger] ||= []).push({ x, y, t: performance.now() });
+      const s = computeSpanFromSamples(); if (s) measure.span = s;
+      drawMeasure(); updateMeasureStatus();
+    }
     function measurePointerEvent(canvas, e) {
       e.preventDefault();
       const rect = canvas.getBoundingClientRect(); const x = e.clientX - rect.left; const y = e.clientY - rect.top;
-      if (e.type === 'pointerdown') canvas.setPointerCapture(e.pointerId);
+      if (e.type === 'pointerdown') { canvas.setPointerCapture(e.pointerId); captureSampleAt(x, y); }
       if (e.type === 'pointerdown' || e.type === 'pointermove') measure.touches.set(e.pointerId, { id:e.pointerId, x, y });
       if (e.type === 'pointerup' || e.type === 'pointercancel') measure.touches.delete(e.pointerId);
       // compute span for active finger relative to homing anchor
@@ -830,7 +860,21 @@
       e.preventDefault();
       const rect = canvas.getBoundingClientRect();
       if (e.type === 'touchstart' || e.type === 'touchmove') {
-        for (const t of Array.from(e.changedTouches)) {
+        const changed = Array.from(e.changedTouches);
+        if (e.type === 'touchstart') {
+          const finger = Fingers[measure.fingerIdx];
+          const anchors = State.data.homing.anchors || {};
+          const a = anchors[finger];
+          if (a) {
+            let best=null, bestD=Infinity;
+            changed.forEach(t=>{
+              const x0 = t.clientX - rect.left; const y0 = t.clientY - rect.top;
+              const d = (x0-a.x)**2 + (y0-a.y)**2; if (d<bestD){ bestD=d; best={x:x0,y:y0,id:t.identifier}; }
+            });
+            if (best) captureSampleAt(best.x, best.y);
+          }
+        }
+        for (const t of changed) {
           const x = t.clientX - rect.left; const y = t.clientY - rect.top;
           measure.touches.set(t.identifier, { id: t.identifier, x, y });
         }
@@ -862,7 +906,9 @@
       const up = s? (s.upPx/pxmm).toFixed(1) : '0';
       const down = s? (s.downPx/pxmm).toFixed(1) : '0';
       const lat = s? (s.latPx/pxmm).toFixed(1) : '0';
-      measureStatus.textContent = `Finger: ${Fingers[measure.fingerIdx]} · Up: ${up} mm · Down: ${down} mm · Lateral: ${lat} mm`;
+      const f = Fingers[measure.fingerIdx];
+      const n = (measure.samples[f]||[]).length;
+      measureStatus.textContent = `Finger: ${f} · Up: ${up} mm · Down: ${down} mm · Lateral: ${lat} mm · Samples: ${n}`;
     }
     function commitMeasurement() {
       const s = measure.span; if (!s) return;
@@ -878,7 +924,7 @@
       measure.span = null; measure.touches.clear();
       measure.fingerIdx = Math.min(measure.fingerIdx + 1, Fingers.length-1);
       drawMeasure();
-      measurePrompt.textContent = `Move the ${Fingers[measure.fingerIdx]} up/down, keep others steady. Tap Done when captured.`;
+      measurePrompt.textContent = `Tap to add samples for ${Fingers[measure.fingerIdx]} (move to extremes, then tap). Others stay steady.`;
       updateMeasureStatus();
       if (measure.fingerIdx === Fingers.length-1) btnMeasureNext.disabled = true; else btnMeasureNext.disabled = false;
     }
@@ -887,13 +933,13 @@
     } else {
       ['touchstart','touchmove','touchend','touchcancel'].forEach(type=> canvasMeasure.addEventListener(type, ev=> measureTouchEvent(canvasMeasure, ev), {passive:false}));
     }
-    btnMeasureRedo.addEventListener('click', ()=>{ measure.span = null; drawMeasure(); updateMeasureStatus(); });
+    btnMeasureRedo.addEventListener('click', ()=>{ const f = Fingers[measure.fingerIdx]; measure.samples[f] = []; measure.span = null; drawMeasure(); updateMeasureStatus(); });
     btnMeasureDone.addEventListener('click', ()=> commitMeasurement());
     btnMeasureNext.addEventListener('click', ()=> advanceFinger());
     btnMeasureToResults.addEventListener('click', ()=> showScreen('results'));
     // When entering measure screen, initialize
     const obs = new MutationObserver(()=>{ if ($('#screen-measure').classList.contains('active')) { initMeasure(); measure.fingerIdx = 0; // start with index
-      measurePrompt.textContent = `Move the ${Fingers[measure.fingerIdx]} up/down, keep others steady. Tap Done when captured.`; updateMeasureStatus(); }
+      measurePrompt.textContent = `Tap to add samples for ${Fingers[measure.fingerIdx]} (move to extremes, then tap). Others stay steady.`; updateMeasureStatus(); }
     });
     obs.observe($('#screen-measure'), { attributes:true, attributeFilter:['class'] });
 
